@@ -1,0 +1,12 @@
+{
+  "module-index-custody-guard": {
+    "enabled": true,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python ../tools/stop_hook_guard.py",
+        "timeout": 15
+      }
+    ]
+  }
+}

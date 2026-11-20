@@ -1,0 +1,10 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../AiEvents.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ClaudeDesktopCatalog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationDiscoverySource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../AiPlatformObserver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../AiPlatformSetup.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.AiModules.cs" />
+  </ItemGroup>
+</Project>

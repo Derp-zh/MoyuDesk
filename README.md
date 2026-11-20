@@ -1,17 +1,17 @@
-<!-- README_SYNC: source=working-tree; updated=2026-11-03 -->
-简体中文 · [English](README_EN.md)
+<!-- README_SYNC: source=working-tree; updated=2026-11-20 -->
+简体中文 · [English](README_EN.md) · [版本记录](CHANGELOG.md)
 
-# 即时任务看板
+# 摸鱼台 · MoyuDesk
 
-一个常驻 Windows 桌面的任务看板，用来随手记灵感、整理任务进度，并把任务阶段与 Codex 会话对应起来。
+一个常驻 Windows 桌面的任务看板，用来随手记灵感、整理任务进度，并把任务阶段与 Codex / DSH / Claude 会话对应起来。
 
 适合同时推进多件事、经常需要在 AI 会话之间切换的人：把想做的事、正在做的事和需要自己处理的事放到桌面上，随时查看和继续。
 
-如果这个工具对你有用，欢迎到[项目首页](https://github.com/Derp-zh/instant-taskboard)点一个 Star，方便收藏。
+如果这个工具对你有用，欢迎到[项目首页](https://github.com/Derp-zh/MoyuDesk)点一个 Star，方便收藏。
 
-[下载 Windows 版本](https://github.com/Derp-zh/instant-taskboard/releases/latest) · [反馈问题](https://github.com/Derp-zh/instant-taskboard/issues)
+[下载 Windows 版本](https://github.com/Derp-zh/MoyuDesk/releases/latest) · [反馈问题](https://github.com/Derp-zh/MoyuDesk/issues)
 
-当前版本 **0.9.30**：整理 Codex 接入，保留离线聊天目录和自动重连，修复不可靠的状态判断；设置窗口按用途重新分组，常用项靠前、诊断信息按需展开。详见[版本说明](docs/RELEASE-NOTES-0.9.30.md)。
+当前版本 **0.9.53** 已更名为摸鱼台。新版改善了阶段编辑、长文本卡片的响应和重复绑定时的提醒联动。当前能力与待办见[当前状态](docs/STATUS.md)，版本演进见[版本记录](CHANGELOG.md)。
 
 ## 用它做什么
 
@@ -58,11 +58,11 @@
 - 会话实际恢复执行后，任务回到进行中；有多个运行阶段时，仍在等待处理的阶段优先。
 - AI 执行结束不会自动把任务标成已完成，最终完成由你确认。
 
-**在“设置 → AI 平台”检查连接、查看已关联聊天的监测结果，无需脚本、观察端口或重启 Codex。** 聊天目录直接只读本机已有数据库，不为列聊天启动辅助服务；“测试已关联聊天”复用已收到的状态，不另开订阅。目录、本机连接及具体聊天能力分别显示，不发送消息、代答或批准。操作见[使用说明](docs/USER-GUIDE-0.9.30.md)。
+**在“设置 → AI 平台”检查连接、查看已关联聊天的监测结果，无需脚本、观察端口或重启 Codex。** 聊天目录直接只读本机已有数据库，不为列聊天启动辅助服务；“测试已关联聊天”复用已收到的状态，不另开订阅。目录、本机连接及具体聊天能力分别显示，不发送消息、代答或批准。操作见[现行模块说明](docs/current/README.md)。
 
-本版尚未实现完全不影响 Codex 闲置释放：已确认的长时间执行／等待仍持续观察；从未实时捕获的极短轮次可能显示“待确认”。完整原桌面问答／批准／恢复与系统级流量节省未在本版验收，不把文件中的“进行中”当作实际执行。范围见[本版验收](docs/ACCEPTANCE-0.9.30.md)。
+当前源码只读已有本机记录、行为日志与前台原生请求控件，不连接 Codex 管道或端口、不订阅、不启动 CLI。详见 [Codex 现行范围](docs/current/C01-Codex接入.md) 和 [当前状态](docs/STATUS.md)。
 
-AI 平台标签也可以用于一般分类；选择某个标签不代表已经连接那个平台。飞书双向同步、DSH 和 WorkBuddy 的实际接入尚未实现。
+AI 平台标签也可以用于一般分类；选择某个标签不代表已经连接那个平台。DSH已接入本机日志监听；飞书双向同步与WorkBuddy实际接入仍待实现，飞书用户界面暂不显示。
 
 ## 自定义通知提示音
 
@@ -74,12 +74,12 @@ AI 平台标签也可以用于一般分类；选择某个标签不代表已经�
 
 适用于 Windows 10（2004 或更新版本）及 Windows 11，64 位。
 
-1. 打开[最新版本下载页](https://github.com/Derp-zh/instant-taskboard/releases/latest)，下载 Windows x64 ZIP。
-2. 完整解压，运行 `即时任务看板.exe`。运行包已包含 .NET，无需单独安装；请保留解压后的整个目录。
+1. 打开[最新版本下载页](https://github.com/Derp-zh/MoyuDesk/releases/latest)，下载 Windows x64 ZIP。
+2. 完整解压，运行 `MoyuDesk.exe`。运行包已包含 .NET，无需单独安装；请保留解压后的整个目录。
 3. 点击悬浮球展开看板，在灵感库直接记一条想法，或从任意列表的新建入口建立任务。
 4. 在任务中设置需要的提醒；窗口、快捷键和开机启动可在设置中调整，默认全局快捷键为 `Ctrl+~`。
 
-升级前先从旧版本托盘退出，再完整解压新版。更多操作见[使用说明](docs/USER-GUIDE-0.9.30.md)。
+升级前先从旧版本托盘退出，再完整解压新版。更多操作见[现行模块说明](docs/current/README.md)。
 
 ## 数据保存在本机
 
@@ -87,6 +87,6 @@ AI 平台标签也可以用于一般分类；选择某个标签不代表已经�
 
 程序文件和数据目录分开保存。换电脑时需要同时带走实际使用的数据、配置目录；设置中的“配置备份”只备份设置，**不包含任务和草稿**。
 
-问题与建议欢迎提交到 [Issues](https://github.com/Derp-zh/instant-taskboard/issues)，也可以在[项目首页](https://github.com/Derp-zh/instant-taskboard)点 Star 收藏，方便以后找到。
+问题与建议欢迎提交到 [Issues](https://github.com/Derp-zh/MoyuDesk/issues)，也可以在[项目首页](https://github.com/Derp-zh/MoyuDesk)点 Star 收藏，方便以后找到。
 
 仓库目前未提供 LICENSE 文件，源码的使用与再分发授权条款尚未声明。

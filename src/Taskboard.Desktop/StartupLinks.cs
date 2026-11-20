@@ -110,11 +110,11 @@ internal static class StartupLinks
         {
             shell = Activator.CreateInstance(shellType)!;
             dynamic dynamicShell = shell;
-            link = dynamicShell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "即时任务看板.lnk"));
+            link = dynamicShell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Brand.Name + ".lnk"));
             dynamic shortcut = link;
             shortcut.TargetPath = LatestExecutable();
             shortcut.WorkingDirectory = Path.GetDirectoryName(LatestExecutable());
-            shortcut.Description = "即时任务看板";
+            shortcut.Description = Brand.Name;
             shortcut.Save();
         }
         finally

@@ -96,7 +96,7 @@ internal sealed class NotificationListeningService : IDisposable
             {
                 soundLock ??= new Mutex(false, @"Local\Taskboard.NotificationSoundReplacement");
                 try { ownsLock = soundLock.WaitOne(0); } catch (AbandonedMutexException) { ownsLock = true; }
-                if (!ownsLock) { Status = "另一个即时任务看板正在管理通知声音，请先关闭它的监听或退出"; return false; }
+                if (!ownsLock) { Status = $"另一个{Brand.Name}正在管理通知声音，请先关闭它的监听或退出"; return false; }
             }
             lease ??= new NotificationSoundLease(journalFile, new WindowsNotificationSoundStore());
             var errors = lease.RestoreAll();

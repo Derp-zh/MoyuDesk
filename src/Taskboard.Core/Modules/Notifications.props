@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationListening.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ReminderClock.cs" />
+  </ItemGroup>
+</Project>

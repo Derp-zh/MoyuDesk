@@ -11,6 +11,7 @@ internal sealed partial class SettingsSurface
     // Group the existing controls without rebuilding their bindings or handlers.
     internal static void OrganizeSettingsPage(string name, StackPanel panel)
     {
+        if (name == "归档") return; // This page owns its explicit layout and record list.
         var items = panel.Children.Cast<UIElement>().ToArray();
         if (items.Length == 0) return;
         var descriptions = new Dictionary<string, string>
@@ -20,8 +21,7 @@ internal sealed partial class SettingsSurface
             ["监听"] = "为指定应用设置统一的通知提示音。",
             ["归档"] = "管理自动归档规则，找回已归档的任务。",
             ["数据与备份"] = "备份程序配置，管理任务与配置的保存位置。",
-            ["AI平台接入情况"] = "连接已有聊天，让任务状态与 AI 工作进度对应。",
-            ["飞书接入情况"] = "查看飞书连接与同步的开放情况。"
+            ["AI平台接入情况"] = "管理Codex监听及其他AI平台监听，让任务与会话状态对应。"
         };
         var title = items[0] is TextBlock oldTitle && name == "归档" ? oldTitle.Text : SectionCaption(name);
         void Header()
@@ -60,7 +60,8 @@ internal sealed partial class SettingsSurface
             if (resize < 3) return;
             panel.Children.Clear(); Header();
             Group("", items.Skip(1).Take(1));
-            Group("透明度", items.Skip(2).Take(resize - 2));
+            Group("", items.Skip(2).Take(1));
+            Group("透明度", items.Skip(3).Take(resize - 3));
             Group("尺寸与位置", items.Skip(resize));
         }
         else if (name == "数据与备份" && items.Length == 10)
@@ -72,13 +73,6 @@ internal sealed partial class SettingsSurface
             foreach (var child in items.Skip(4).Take(3)) locations.Children.Add(child);
             CompactActions(locations); panel.Children.Add(SettingsDisclosure("存储位置", locations));
             panel.Children.Add(items[9]);
-        }
-        else if (name == "归档")
-        {
-            // Policy controls stay together, while archive items remain individually accessible.
-            panel.Children.Clear(); Header();
-            Group("归档规则", items.Skip(1).Take(5));
-            foreach (var child in items.Skip(6)) panel.Children.Add(child);
         }
         else if (name == "监听")
         {

@@ -6,6 +6,7 @@ test-output/
 可运行版/data/
 *.zip
 preserved-data/
+archive/
 __pycache__/
 *.py[cod]
 release/

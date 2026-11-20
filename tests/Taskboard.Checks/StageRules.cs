@@ -86,7 +86,7 @@ internal static class StageRules
         var previousBindings = restored.Stages.Select(x => x.Codex!.BindingId).ToArray(); engine.Delete(restored.Id); engine.Undo();
         var recovered = engine.State.Tasks.Single();
         check(recovered.Stages.Select(x => x.Codex!.ThreadId).SequenceEqual(new[] { "replacement", "old-thread" }) && recovered.Stages.Select(x => x.Codex!.BindingId).Zip(previousBindings).All(x => x.First != x.Second), "撤销删除保留每阶段会话且更换监听身份，拒绝删除前的排队信号");
-        edit = engine.Edit(recovered.Id); var added = engine.AddStage(edit); added.Codex = new CodexBinding { ThreadId = "new-stage-thread" };
+        edit = engine.Edit(recovered.Id); var added = engine.AddStage(edit); added.IsRunning = false; added.Codex = new CodexBinding { ThreadId = "new-stage-thread" };
         var addedIdentity = engine.Submit(edit).Stages[^1].Codex!.BindingId; engine.Undo(); engine.Redo();
         check(engine.State.Tasks.Single().Stages[^1].Codex is { ThreadId: "new-stage-thread" } revived && revived.BindingId != addedIdentity && revived.Phase == CodexPhase.Unknown, "重做已移除阶段时重新核实关联，旧阶段排队信号不可套用");
         edit = engine.Edit(recovered.Id); edit.Working.Title = "保留后台阶段开关";
@@ -105,6 +105,44 @@ internal static class StageRules
         check(merged.Stages.Count(x => x.IsRunning == true) == 1 && merged.Stages[1].IsRunning == true, "编辑和列表并发关闭不同阶段时，合并仍保留编辑侧选定的运行阶段");
         var prefs = new Preferences();
         check(prefs.InspirationQuickEntry && prefs.Hotkey.Enabled && prefs.Hotkey.Modifiers == 2 && prefs.Hotkey.VirtualKey == 0xC0, "快捷卡片默认开启，默认快捷键按物理Ctrl和波浪键定义");
+        check(prefs.NewStageDefaultState == NewStageDefaultState.ContextDependent, "新建阶段默认状态偏好默认为情境判断（选项A）");
         check(!new BoardHotkey { Modifiers = 0 }.IsValid && !new BoardHotkey { VirtualKey = 0x7B }.IsValid && !new BoardHotkey { VirtualKey = 162 }.IsValid, "拒绝无修饰键、保留F12以及纯修饰键注册");
+
+        var modeEngine = new BoardEngine(new BoardState());
+        var customCol = new BoardColumn { Name = "自定义进行中" };
+        modeEngine.State.Preferences.Columns.Add(customCol);
+        foreach (var lane in Enum.GetValues<Lane>())
+        {
+            var draft = modeEngine.NewSession(lane);
+            check(modeEngine.AddStage(draft).IsRunning == false, $"选项A下新建任务({lane})添加阶段默认未运行");
+        }
+        var inspTask = modeEngine.NewSession(Lane.Inspiration); inspTask.Working.Title = "灵感任务"; inspTask = modeEngine.Edit(modeEngine.Submit(inspTask).Id);
+        check(modeEngine.AddStage(inspTask).IsRunning == false, "选项A下灵感库任务编辑添加阶段默认未运行");
+        modeEngine.Discard(inspTask);
+        var refTask = modeEngine.NewSession(Lane.Refining); refTask.Working.Title = "完善任务"; refTask = modeEngine.Edit(modeEngine.Submit(refTask).Id);
+        check(modeEngine.AddStage(refTask).IsRunning == false, "选项A下完善中任务编辑添加阶段默认未运行");
+        modeEngine.Discard(refTask);
+        var runTask = modeEngine.NewSession(Lane.Running); runTask.Working.Title = "进行中任务"; runTask = modeEngine.Edit(modeEngine.Submit(runTask).Id);
+        check(modeEngine.AddStage(runTask).IsRunning == true, "选项A下进行中任务编辑添加阶段默认运行中");
+        modeEngine.Discard(runTask);
+        var customTask = modeEngine.NewSession(Lane.Refining); customTask.Working.ColumnId = customCol.Id; customTask.Working.Title = "自定义列任务"; customTask = modeEngine.Edit(modeEngine.Submit(customTask).Id);
+        check(modeEngine.AddStage(customTask).IsRunning == true, "选项A下自定义列表任务编辑添加阶段默认运行中");
+        modeEngine.Discard(customTask);
+
+        modeEngine.State.Preferences.NewStageDefaultState = NewStageDefaultState.AlwaysRunning;
+        var draftAlwaysRun = modeEngine.NewSession(Lane.Inspiration);
+        check(modeEngine.AddStage(draftAlwaysRun).IsRunning == true, "选项B下新建任务添加阶段默认运行中");
+        var inspAlwaysRun = modeEngine.Edit(modeEngine.State.Tasks.First(x => x.Lane == Lane.Inspiration).Id);
+        check(modeEngine.AddStage(inspAlwaysRun).IsRunning == true, "选项B下灵感库任务编辑添加阶段默认运行中");
+        modeEngine.Discard(inspAlwaysRun);
+
+        modeEngine.State.Preferences.NewStageDefaultState = NewStageDefaultState.AlwaysInactive;
+        var runAlwaysInactive = modeEngine.Edit(modeEngine.State.Tasks.First(x => x.Lane == Lane.Running && x.ColumnId is null).Id);
+        check(modeEngine.AddStage(runAlwaysInactive).IsRunning == false, "选项C下进行中任务编辑添加阶段默认未运行");
+        modeEngine.Discard(runAlwaysInactive);
+
+        var modeStore = new AtomicStore(Path.Combine(root, "new-stage-mode"));
+        await modeStore.SaveAsync(modeEngine.State);
+        check(modeStore.Load().Preferences.NewStageDefaultState == NewStageDefaultState.AlwaysInactive, "新建阶段默认状态偏好持久化且重启回读一致");
     }
 }

@@ -1,17 +1,17 @@
-<!-- README_SYNC: source=working-tree; updated=2026-11-03 -->
+<!-- README_SYNC: source=working-tree; updated=2026-11-20 -->
 [简体中文](README.md) · English
 
-# Instant Taskboard
+# MoyuDesk
 
 A Windows desktop task board for capturing ideas, organizing work, and linking individual task stages to Codex conversations.
 
 Built for people juggling several tasks and AI conversations: keep your ideas, ongoing work, and tasks that need your attention visible on the desktop, ready to pick up again.
 
-Find it useful? [Star the project](https://github.com/Derp-zh/instant-taskboard) to keep it handy.
+Find it useful? [Star the project](https://github.com/Derp-zh/MoyuDesk) to keep it handy.
 
-[Download for Windows](https://github.com/Derp-zh/instant-taskboard/releases/latest) · [Report an issue](https://github.com/Derp-zh/instant-taskboard/issues)
+[Download for Windows](https://github.com/Derp-zh/MoyuDesk/releases/latest) · [Report an issue](https://github.com/Derp-zh/MoyuDesk/issues)
 
-Current version **0.9.30** keeps the offline Codex chat catalog and automatic reconnection while removing unreliable state inference. Settings are grouped by purpose, with everyday controls up front and diagnostics available on demand. See the [release notes](docs/RELEASE-NOTES-0.9.30.md).
+Version **0.9.53** introduces the MoyuDesk name and improves stage editing, responsiveness for long cards, and alert handling for stages linked to the same conversation. See the [current status](docs/STATUS.md) and [changelog](CHANGELOG.md).
 
 ## What is it for?
 
@@ -58,9 +58,9 @@ The board connects to the existing local state channel at startup. When reliable
 - Actual execution resuming moves it back to In progress. If several stages are active, a stage still waiting for attention takes priority.
 - A completed AI run never marks the task Done automatically. You decide when the task is finished.
 
-**Check the connection and view existing monitoring results from Settings → AI platforms. No script, observation port, or Codex restart is required.** The chat catalog reads the existing local database without starting a helper service. Testing linked chats reuses received state and adds no subscription. Catalog access, the local connection, and per-chat capability are reported separately. No messages, answers, or approvals are sent. See the [user guide](docs/USER-GUIDE-0.9.30.md).
+**Check the connection and view existing monitoring results from Settings → AI platforms. No script, observation port, or Codex restart is required.** The chat catalog reads the existing local database without starting a helper service. Testing linked chats reuses received state and adds no subscription. Catalog access, the local connection, and per-chat capability are reported separately. No messages, answers, or approvals are sent. See the [current module guide](docs/current/README.md).
 
-This version does not eliminate Codex idle-retention effects: confirmed long-running or waiting turns still use ongoing observation, and a short turn never captured live may remain unconfirmed. The full original-desktop question/approval/resumption lifecycle and system-wide traffic savings have not been accepted for this release. A persisted “in progress” record alone is not treated as execution. See the [acceptance scope](docs/ACCEPTANCE-0.9.30.md).
+Current source passively reads existing local records and behavior logs, without Codex pipes, ports, subscriptions, or CLI startup. Foreground question detection has a known failure; full daily scenario coverage remains incomplete. See [current scope](docs/current/C01-Codex接入.md) and [status](docs/current/STATUS.md).
 
 AI platform labels can also serve as ordinary categories; choosing one does not connect that platform. Feishu two-way sync and live DSH or WorkBuddy integration are not implemented.
 
@@ -74,12 +74,12 @@ Listening is off by default. Actual notification capture, replacement of the ori
 
 For 64-bit Windows 10 (version 2004 or later) and Windows 11.
 
-1. Open the [latest release](https://github.com/Derp-zh/instant-taskboard/releases/latest) and download the Windows x64 ZIP.
-2. Extract the entire archive and run `即时任务看板.exe`. The package includes .NET, so no separate runtime installation is needed. Keep the extracted folder intact.
+1. Open the [latest release](https://github.com/Derp-zh/MoyuDesk/releases/latest) and download the Windows x64 ZIP.
+2. Extract the entire archive and run `MoyuDesk.exe`. The package includes .NET, so no separate runtime installation is needed. Keep the extracted folder intact.
 3. Click the floating button to open the board. Capture an idea directly in the Ideas list, or create a task from any list.
 4. Add reminders to individual tasks. Adjust windows, the shortcut, and startup at sign-in in Settings. The default global shortcut is `Ctrl+~`.
 
-Before upgrading, exit the old version from its tray menu, then extract the new version in full. See the [user guide](docs/USER-GUIDE-0.9.30.md) for more.
+Before upgrading, exit the old version from its tray menu, then extract the new version in full. See the [current module guide](docs/current/README.md) for more.
 
 ## Local data
 
@@ -87,6 +87,6 @@ Tasks, stages, and drafts are stored locally. The default task directory is `%LO
 
 App files and data are stored separately. When moving to another computer, take the actual data and configuration directories with you. The configuration-backup feature saves settings only: **it does not include tasks or drafts**.
 
-Report problems or suggestions through [Issues](https://github.com/Derp-zh/instant-taskboard/issues), or [star the project](https://github.com/Derp-zh/instant-taskboard) to find it again later.
+Report problems or suggestions through [Issues](https://github.com/Derp-zh/MoyuDesk/issues), or [star the project](https://github.com/Derp-zh/MoyuDesk) to find it again later.
 
 The repository currently has no LICENSE file. Terms for using and redistributing the source have not been declared.

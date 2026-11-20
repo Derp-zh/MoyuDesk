@@ -52,14 +52,14 @@ internal partial class SurfaceWindow
         new WindowInteropHelper(this).EnsureHandle(); UpdateGlassGeometry();
         contentHost.AnimationHidden = false; contentHost.Visibility = Visibility.Visible; Root.Opacity = 1;
         Root.Measure(new Size(Width, Height)); Root.Arrange(new Rect(0, 0, Width, Height)); Root.UpdateLayout();
-        scrollGlow.Opacity = initialLight; scrollGlow.Visibility = Visibility.Visible;
+        scrollGlow.Opacity = initialLight;
+        scrollGlow.Visibility = HorizontalRevealAnchor == 0 ? Visibility.Visible : Visibility.Collapsed;
         Native.ClipLiveScroll(this, from);
         if (!IsVisible && visible) ShowImmediately();
         Native.ShowWindow(ContentHandle, 4); IsHitTestVisible = visible;
         await Dispatcher.InvokeAsync(() => Root.UpdateLayout(), DispatcherPriority.Render);
         if (generation != motion) return;
-        // Let the first live layout reach composition before starting the
-        // 100ms clock. Cold text/control rendering must not consume the flare.
+        // Real controls reach composition before the shared 100ms timeline.
         var prepared = new TaskCompletionSource<bool>(); var rendered = 0;
         var preparationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(80) };
         preparationDeadline.Tick += (_, _) => prepared.TrySetResult(true);
@@ -69,29 +69,32 @@ internal partial class SurfaceWindow
         preparationDeadline.Start(); var ready = await prepared.Task; preparationDeadline.Stop();
         if (!ready || generation != motion) return;
         CompositionTarget.Rendering -= liveScrollFrame; liveScrollFrame = null; cancelLivePreparation = null;
-        if (participant is not null) await participant.Ready();
-        if (generation != motion) return;
-        MotionDisplayStartTicks = Stopwatch.GetTimestamp(); scrollClock.Restart(); LiveScrollRevealCount++;
-        UsesIndependentAnimation = false;
-        void Finish()
+        if (participant is not null) participant.Start(BeginMotion); else BeginMotion();
+        void BeginMotion()
         {
-            if (generation != motion || !scrollRunning) return;
-            CancelLiveScrollFrame(); animationDeadline?.Stop(); scrollRunning = false; animating = false;
-            if (!visible) { HideImmediately(); if (destroyAfterScroll) Destroy(false); }
-            else Native.ClipWindow(this, Height);
-            IsHitTestVisible = true;
+            if (generation != motion) return;
+            MotionDisplayStartTicks = Stopwatch.GetTimestamp(); scrollClock.Restart(); LiveScrollRevealCount++;
+            UsesIndependentAnimation = false;
+            void Finish()
+            {
+                if (generation != motion || !scrollRunning) return;
+                CancelLiveScrollFrame(); animationDeadline?.Stop(); scrollRunning = false; animating = false;
+                if (!visible) { HideImmediately(); if (destroyAfterScroll) Destroy(false); }
+                else Native.ClipWindow(this, Height);
+                IsHitTestVisible = true;
+            }
+            liveScrollFrame = (_, _) =>
+            {
+                if (generation != motion || !scrollRunning) return;
+                var fraction = Math.Clamp(scrollClock.Elapsed.TotalMilliseconds / scrollDuration, 0, 1);
+                Native.ClipLiveScroll(this, ScrollProgress);
+                scrollGlow.Opacity = ScrollMotion.Light(fraction, visible, initialLight);
+                if (fraction >= 1) Finish();
+            };
+            CompositionTarget.Rendering += liveScrollFrame;
+            animationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(scrollDuration + 16) };
+            animationDeadline.Tick += (_, _) => Finish(); animationDeadline.Start();
+            LiveScrollStarted?.Invoke();
         }
-        liveScrollFrame = (_, _) =>
-        {
-            if (generation != motion || !scrollRunning) return;
-            var fraction = Math.Clamp(scrollClock.Elapsed.TotalMilliseconds / scrollDuration, 0, 1);
-            Native.ClipLiveScroll(this, ScrollProgress);
-            scrollGlow.Opacity = ScrollMotion.Light(fraction, visible, initialLight);
-            if (fraction >= 1) Finish();
-        };
-        CompositionTarget.Rendering += liveScrollFrame;
-        animationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(scrollDuration + 16) };
-        animationDeadline.Tick += (_, _) => Finish(); animationDeadline.Start();
-        LiveScrollStarted?.Invoke();
     }
 }

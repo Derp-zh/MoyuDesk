@@ -1,0 +1,7 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../AiState.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../AiAttention.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexState.cs" />
+  </ItemGroup>
+</Project>

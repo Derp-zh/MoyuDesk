@@ -7,14 +7,16 @@ using System.Text;
 using System.Windows;
 using System.Windows.Automation;
 using Microsoft.Win32.SafeHandles;
+using Taskboard.Core;
 
 namespace Taskboard.Desktop;
 
 internal sealed record ConversationDropTarget(string? ThreadId, string Name, string Reason, bool CanResolveOnDrop = false,
-    string Method = "explicit-link", bool? ClipboardRestored = null)
+    string Method = "explicit-link", bool? ClipboardRestored = null, AiPlatform Platform = AiPlatform.Codex, bool IsUnbind = false)
 {
-    internal bool CanBind => ThreadId is not null;
+    internal bool CanBind => ThreadId is not null && !IsUnbind;
     internal static ConversationDropTarget Unavailable(string reason) => new(null, "", reason);
+    internal static ConversationDropTarget Unbind(string name, string reason) => new(null, name, reason, Method: "local-binding-window-unlink", IsUnbind: true);
 }
 
 // Experimental source: read an explicit local thread URI from an accessible
@@ -29,35 +31,6 @@ internal static class CodexConversationDropTarget
         if (uri.AbsolutePath.Length != 37 || uri.AbsolutePath[0] != '/') return null;
         var id = uri.AbsolutePath[1..];
         return Guid.TryParseExact(id, "D", out var parsed) && parsed != Guid.Empty ? parsed.ToString("D") : null;
-    }
-    internal static ConversationDropTarget Read(Point screenPoint)
-    {
-        try
-        {
-            var window = GetAncestor(WindowFromPoint(new NativePoint((int)screenPoint.X, (int)screenPoint.Y)), 2);
-            GetWindowThreadProcessId(window, out var processId);
-            if (!VerifyDesktop(processId)) return ConversationDropTarget.Unavailable("请拖到 Codex 会话上");
-            var element = AutomationElement.FromPoint(screenPoint);
-            for (var depth = 0; element is not null && depth < 16; depth++, element = TreeWalker.ControlViewWalker.GetParent(element))
-            {
-                var info = element.Current;
-                if (info.ControlType == ControlType.Hyperlink && info.BoundingRectangle.Contains(screenPoint)
-                    && element.TryGetCurrentPattern(ValuePattern.Pattern, out var value)
-                    && ParseThreadUri(((ValuePattern)value).Current.Value) is { } id)
-                {
-                    var now = GetAncestor(WindowFromPoint(new NativePoint((int)screenPoint.X, (int)screenPoint.Y)), 2);
-                    if (now != window) return ConversationDropTarget.Unavailable("落点窗口已变化，松开不会绑定");
-                    return new(id, string.IsNullOrWhiteSpace(info.Name) ? "未命名会话" : info.Name, "已取得明确会话编号");
-                }
-                if (info.ControlType == ControlType.Window) break;
-            }
-            return CodexConversationMenu.TryLocate(screenPoint) is { } anchor
-                ? new(null, anchor.Name, "松开绑定 · " + anchor.Name, true, "codex-copy-deeplink")
-                : ConversationDropTarget.Unavailable("请拖到 Codex 侧栏会话或当前聊天区域");
-        }
-        catch (Exception error) when (error is InvalidOperationException or ElementNotAvailableException or COMException
-            or UnauthorizedAccessException or System.ComponentModel.Win32Exception or ArgumentException)
-        { return ConversationDropTarget.Unavailable("无法读取准确会话编号，松开不会绑定"); }
     }
     internal static bool VerifyDesktop(uint processId)
     {

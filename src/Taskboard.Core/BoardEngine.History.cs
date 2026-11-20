@@ -6,6 +6,11 @@ public sealed partial class BoardEngine
     {
         if (redo.Count == 0) return;
         var recovery = redo[^1]; redo.RemoveAt(redo.Count - 1); var entry = recovery.Entry;
+        if (entry.Archived)
+        {
+            ReplayArchivedEdit(entry, true); undo.Add(entry); if (undo.Count > 20) undo.RemoveAt(0);
+            Notify([entry.Before.Id]); return;
+        }
         var live = State.Tasks.FirstOrDefault(x => x.Id == entry.Before.Id);
         if (entry.After is null)
         { State.Tasks.RemoveAll(x => x.Id == entry.Before.Id); State.Sessions.RemoveAll(x => x.TaskId == entry.Before.Id); }
@@ -22,10 +27,10 @@ public sealed partial class BoardEngine
         Notify([entry.Before.Id]);
     }
     public bool CanArchive(WorkItem item) => item.ColumnId is null && item.Lane is Lane.Paused or Lane.Done;
-    public void Archive(Guid id)
+    public void Archive(Guid id, bool allowAnyLane = false)
     {
         var item = State.Tasks.First(x => x.Id == id);
-        if (!CanArchive(item)) throw new InvalidOperationException("只有已完成或暂搁置列表的任务可以归档");
+        if (!allowAnyLane && !CanArchive(item)) throw new InvalidOperationException("只有已完成或暂搁置列表的任务可以归档");
         State.Archives.Add(new ArchivedTask { Item = Copies.Of(item), OriginalColumn = Copies.Of(BoardColumns.For(State.Preferences, item)), OriginalIndex = State.Tasks.IndexOf(item) });
         TrimArchiveHistory();
         State.Tasks.Remove(item); State.Sessions.RemoveAll(x => x.TaskId == id);
@@ -35,8 +40,10 @@ public sealed partial class BoardEngine
     {
         var archive = State.Archives.First(x => x.Item.Id == id); var item = Copies.Of(archive.Item);
         if (State.Tasks.Any(x => x.Id == id)) throw new InvalidOperationException("当前列表已存在同一任务，归档未修改");
-        var column = State.Preferences.Columns.FirstOrDefault(x => x.BuiltinLane == archive.OriginalColumn.BuiltinLane);
-        if (column is null) { column = Copies.Of(archive.OriginalColumn); State.Preferences.Columns.Add(column); }
+        var target = archive.RestoreColumn ?? archive.OriginalColumn;
+        var column = State.Preferences.Columns.FirstOrDefault(x => x.Id == target.Id)
+            ?? (target.BuiltinLane is Lane lane ? State.Preferences.Columns.FirstOrDefault(x => x.BuiltinLane == lane) : null);
+        if (column is null) { column = Copies.Of(target); State.Preferences.Columns.Add(column); }
         column.Deleted = false; column.Visible = true; column.Assign(item); CleanReferences(item);
         ResetBindings(item);
         State.Tasks.Insert(Math.Min(archive.OriginalIndex, State.Tasks.Count), item); State.Archives.Remove(archive);
@@ -48,7 +55,10 @@ public sealed partial class BoardEngine
     {
         if (!State.Preferences.AutoDeleteArchives || State.Archives.Count <= 40) return 0;
         var keep = State.Archives.Select((x, i) => (Archive: x, Index: i)).OrderByDescending(x => x.Archive.ArchivedUtc).ThenByDescending(x => x.Index).Take(40).Select(x => x.Archive.Item.Id).ToHashSet();
-        var removed = State.Archives.RemoveAll(x => !keep.Contains(x.Item.Id)); if (removed > 0) Touch(); return removed;
+        var removedIds = State.Archives.Where(x => !keep.Contains(x.Item.Id)).Select(x => x.Item.Id).ToHashSet();
+        var removed = State.Archives.RemoveAll(x => removedIds.Contains(x.Item.Id));
+        State.Sessions.RemoveAll(x => x.TaskId is Guid id && removedIds.Contains(id));
+        if (removed > 0) Touch(); return removed;
     }
     public void InitializeCompletionTimes(DateTime nowUtc)
     {

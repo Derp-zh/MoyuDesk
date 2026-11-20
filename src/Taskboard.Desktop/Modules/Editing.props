@@ -1,0 +1,11 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../DraftCardGeometry.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../DraftStackSurface.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../DraftSwitchMotion.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../EditorSurface.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StageDetailsEditor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StageReorderGesture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ReminderEditor.cs" />
+  </ItemGroup>
+</Project>

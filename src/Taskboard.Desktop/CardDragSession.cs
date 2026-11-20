@@ -26,7 +26,9 @@ internal sealed class CardDragSession : IDisposable
     private ColumnSurface? target;
     public Guid Id { get; }
     public WorkItem Item { get; }
+    public double Width { get; }
     public double Height { get; }
+    internal BitmapSource Snapshot { get; }
     public int PositionUpdates { get; private set; }
     public int PreviewUpdates { get; private set; }
     public double SnapshotMs { get; }
@@ -36,7 +38,7 @@ internal sealed class CardDragSession : IDisposable
     private System.Drawing.Point? previousPointer;
     public CardDragSession(BoardController controller, TaskCard card, WorkItem item, Point grab)
     {
-        this.controller = controller; Item = item; Id = item.Id; Height = card.ActualHeight;
+        this.controller = controller; Item = item; Id = item.Id; Width = card.ActualWidth; Height = card.ActualHeight;
         ballHandle = new WindowInteropHelper(controller.Ball).Handle;
         previousSuppression = controller.SuppressCollapse; controller.SuppressCollapse = true;
         var dpi = VisualTreeHelper.GetDpi(card);
@@ -46,7 +48,9 @@ internal sealed class CardDragSession : IDisposable
         var watch = Stopwatch.StartNew();
         var bitmap = new RenderTargetBitmap(Math.Max(1, (int)Math.Ceiling(card.ActualWidth * dpi.DpiScaleX)),
             Math.Max(1, (int)Math.Ceiling(card.ActualHeight * dpi.DpiScaleY)), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
-        bitmap.Render(card); bitmap.Freeze(); watch.Stop(); SnapshotMs = watch.Elapsed.TotalMilliseconds;
+        var isolated = new DrawingVisual();
+        using (var drawing = isolated.RenderOpen()) drawing.DrawRectangle(new VisualBrush(card), null, new Rect(0, 0, card.ActualWidth, card.ActualHeight));
+        bitmap.Render(isolated); bitmap.Freeze(); Snapshot = bitmap; watch.Stop(); SnapshotMs = watch.Elapsed.TotalMilliseconds;
         ghost = new Window { Width = card.ActualWidth, Height = Height, WindowStyle = WindowStyle.None,
             Title = "任务卡片拖动预览",
             ResizeMode = ResizeMode.NoResize, AllowsTransparency = true, Background = Brushes.Transparent,
@@ -58,10 +62,11 @@ internal sealed class CardDragSession : IDisposable
             var style = GetWindowLong(handle, -20);
             SetWindowLong(handle, -20, style | 0x20 | 0x08000000 | 0x80); // click-through, no activation, tool window
         };
+        if (controller.FocusMode && controller.Columns.Exists(x => x.Definition.BuiltinLane == Lane.Action && x.Definition.Contains(item))) controller.BeginFocusCompletedDrag();
         ghost.Show(); Move();
-        foreach (var column in controller.Columns) column.BeginCardDrag(Id);
+        foreach (var column in controller.Columns) if (column.BeginCardDrag(Id)) target = column;
         timer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(8) };
-        timer.Tick += (_, _) => Move(); timer.Start();
+        timer.Tick += (_, _) => { Move(); if (target?.AdvanceCardDrag(Item, new Point(System.Windows.Forms.Cursor.Position.X, System.Windows.Forms.Cursor.Position.Y)) == true) PreviewUpdates++; }; timer.Start();
     }
     public void Move()
     {
@@ -85,6 +90,7 @@ internal sealed class CardDragSession : IDisposable
     {
         if (disposed) return; disposed = true; timer.Stop(); ghost.Close();
         foreach (var column in controller.Columns) column.EndCardDrag();
+        controller.EndFocusCompletedDrag();
         controller.SuppressCollapse = previousSuppression; Native.RaiseBall();
     }
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong(IntPtr hwnd, int index);

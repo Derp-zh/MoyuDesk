@@ -17,6 +17,12 @@ internal static class CodexLocalCatalog
 
     internal static string LocalPath(string path)
     {
+        // Codex can store local rollout paths in Windows extended-length form.
+        // Normalize only a fully qualified DOS drive path; device namespaces and
+        // extended UNC paths must remain rejected by the network-path check.
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal) && path.Length >= 7 &&
+            char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] is '\\' or '/')
+            path = path[4..];
         if (!Path.IsPathFullyQualified(path)) throw new IOException("Codex 本地数据目录必须是完整的本机路径，请检查 CODEX_HOME／sqlite_home。");
         path = Path.GetFullPath(path);
         if (path.StartsWith(@"\\", StringComparison.Ordinal) || new DriveInfo(Path.GetPathRoot(path)!).DriveType == DriveType.Network)
@@ -82,12 +88,42 @@ internal static class CodexLocalCatalog
                 throw new IOException("Codex 本地聊天目录结构暂不支持，请更新看板；未读取聊天正文或启动辅助服务。");
             var values = new List<CodexThread>();
             var name = columns.Contains("name") ? "COALESCE(NULLIF(name,''),title)" : "title";
-            Query(db, "SELECT id," + name + ",updated_at FROM threads WHERE archived=0 AND source IN ('appServer','cli','vscode','exec','unknown') ORDER BY updated_at DESC,id ASC", row =>
+            var attached = columns.Contains("attached_thread_parent_id") ? "COALESCE(attached_thread_parent_id,'')" : "''";
+            var edges = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var edgeTable = false;
+            Query(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='thread_spawn_edges'", _ => edgeTable = true);
+            if (edgeTable)
             {
-                var id = Text(row, 0);
-                if (Guid.TryParseExact(id, "D", out _)) values.Add(new(id, Text(row, 1), Native.sqlite3_column_int64(row, 2)));
+                var edgeColumns = new HashSet<string>(StringComparer.Ordinal);
+                Query(db, "PRAGMA table_info(thread_spawn_edges)", row => edgeColumns.Add(Text(row, 1)));
+                if (edgeColumns.Contains("parent_thread_id") && edgeColumns.Contains("child_thread_id"))
+                    Query(db, "SELECT child_thread_id,parent_thread_id FROM thread_spawn_edges", row =>
+                    {
+                        var child = Text(row, 0); var parent = Text(row, 1);
+                        if (!Guid.TryParseExact(child, "D", out _) || !Guid.TryParseExact(parent, "D", out _)) return;
+                        if (!edges.TryGetValue(child, out var parents)) edges[child] = parents = new(StringComparer.Ordinal);
+                        parents.Add(parent);
+                    });
+            }
+            Query(db, "SELECT id," + name + ",updated_at,source," + attached + " FROM threads WHERE archived=0 ORDER BY updated_at DESC,id ASC", row =>
+            {
+                var id = Text(row, 0); if (!Guid.TryParseExact(id, "D", out _)) return;
+                var source = Text(row, 3); var parents = edges.TryGetValue(id, out var known) ? new HashSet<string>(known, StringComparer.Ordinal) : new(StringComparer.Ordinal);
+                var parent = Text(row, 4); if (parent.Length > 0) parents.Add(parent);
+                if (source.StartsWith('{'))
+                    try
+                    {
+                        using var json = JsonDocument.Parse(source);
+                        if (json.RootElement.TryGetProperty("subagent", out var agent) && agent.ValueKind == JsonValueKind.Object &&
+                            agent.TryGetProperty("thread_spawn", out var spawn) && spawn.ValueKind == JsonValueKind.Object &&
+                            spawn.TryGetProperty("parent_thread_id", out var owner) && owner.ValueKind == JsonValueKind.String && owner.GetString() is { Length: > 0 } value) parents.Add(value);
+                    }
+                    catch (JsonException) { }
+                if (source is not ("appServer" or "cli" or "vscode" or "exec" or "unknown") && parents.Count == 0) return;
+                parent = parents.Count == 0 ? "" : parents.Count == 1 && Guid.TryParseExact(parents.First(), "D", out _) ? parents.First() : "unverified-parent";
+                values.Add(new(id, Text(row, 1), Native.sqlite3_column_int64(row, 2), ParentId: parent));
             });
-            return values.ToArray();
+            return CodexThreadFamilies.Resolve(values);
         }
         finally { if (db != IntPtr.Zero) Native.sqlite3_close(db); }
     }

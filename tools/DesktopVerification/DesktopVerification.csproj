@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><Nullable>enable</Nullable>
+    <AssemblyName>Taskboard</AssemblyName><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DraftSwitchSpeed Condition="'$(DraftSwitchSpeed)' == ''">1.35</DraftSwitchSpeed>
+    <DefineConstants Condition="'$(DraftSwitchSpeed)' == '1.35'">$(DefineConstants);FAST_DRAFT_SWITCH</DefineConstants>
+    <ApplicationManifest>../../src/Taskboard.Desktop/app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Taskboard.Desktop/**/*.cs" Exclude="../../src/Taskboard.Desktop/**/obj/**;../../src/Taskboard.Desktop/**/bin/**;../../src/Taskboard.Desktop/Program.cs" />
+    <Compile Include="Program.cs;Checks/*.cs" />
+    <Page Include="../../src/Taskboard.Desktop/Theme.xaml" Link="Theme.xaml" />
+    <Resource Include="../../src/Taskboard.Desktop/Assets/orb.ico" Link="Assets/orb.ico" />
+    <EmbeddedResource Include="../../src/Taskboard.Desktop/Assets/Alarm04.wav" LogicalName="Taskboard.DefaultNotification.wav" />
+    <Content Include="../../src/Taskboard.Desktop/integrations/dsh-observer.mjs" Link="integrations/dsh-observer.mjs" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" /><PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Interop.UIAutomationClient" Version="10.19041.0" />
+    <ProjectReference Include="../../src/Taskboard.Core/Taskboard.Core.csproj" />
+  </ItemGroup>
+</Project>

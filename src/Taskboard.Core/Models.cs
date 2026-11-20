@@ -4,6 +4,7 @@ namespace Taskboard.Core;
 
 public enum Lane { Inspiration, Refining, Running, Action, Paused, Done }
 public enum Repeat { Once, Daily, Weekly }
+public enum NewStageDefaultState { ContextDependent, AlwaysRunning, AlwaysInactive }
 
 public static class Names
 {
@@ -90,9 +91,38 @@ public sealed class WorkItem : System.Text.Json.Serialization.IJsonOnDeserialize
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasContent => !string.IsNullOrWhiteSpace(Title) || Stages.Any(x => !string.IsNullOrWhiteSpace(x.Text));
     [System.Text.Json.Serialization.JsonIgnore]
-    public string DisplayTitle => !string.IsNullOrWhiteSpace(Title) ? Title.Trim() :
-        Stages.Where(x => Stages.Count == 1 || x.IsRunning == true).SelectMany(x => x.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "未命名任务";
+    public string DisplayTitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(Title)) return Title.Trim();
+            foreach (var stage in Stages)
+            {
+                if (Stages.Count != 1 && stage.IsRunning != true) continue;
+                var line = FirstNonEmptyLine(stage.Text);
+                if (line is not null) return line;
+            }
+            return "未命名任务";
+        }
+    }
+    private static string? FirstNonEmptyLine(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return null;
+        var index = 0;
+        while (index < text.Length)
+        {
+            var end = text.IndexOfAny(['\r', '\n'], index);
+            var length = (end < 0 ? text.Length : end) - index;
+            if (length > 0)
+            {
+                var slice = text.AsSpan(index, length).Trim();
+                if (!slice.IsEmpty) return slice.ToString();
+            }
+            if (end < 0) break;
+            index = end + 1;
+        }
+        return null;
+    }
 }
 
 public sealed class EditSession
@@ -140,6 +170,19 @@ public sealed class WindowPosition
 
 public sealed class Preferences : System.Text.Json.Serialization.IJsonOnDeserialized
 {
+    // Legacy preference is retained for old backups; no longer starts notification capture.
+    public bool CodexNotificationWaiting { get; set; }
+    public bool CodexBehaviorSupplement { get; set; } = true;
+    public bool AutoCreateAiTasks { get; set; }
+    public bool QuickAiOnAllColumns { get; set; }
+    public bool CompletedChronological { get; set; } = true;
+    public bool RunningFocusMode { get; set; }
+    public bool AutoOpenConversationBindingWindow { get; set; } = true;
+    public bool EllipsizeStageDetails { get; set; }
+    public bool CollapseInactiveStageDetails { get; set; } = true;
+    public NewStageDefaultState NewStageDefaultState { get; set; } = NewStageDefaultState.ContextDependent;
+    public int PlatformPaletteVersion { get; set; }
+    public List<string> RecentColors { get; set; } = [];
     public bool AutoArchiveCompleted { get; set; } = true;
     public int AutoArchiveAfterDays { get; set; } = 5;
     public bool AutoDeleteArchives { get; set; }
@@ -182,12 +225,14 @@ public sealed class ArchivedTask
 {
     public WorkItem Item { get; set; } = new();
     public BoardColumn OriginalColumn { get; set; } = new();
+    public BoardColumn? RestoreColumn { get; set; }
     public DateTime ArchivedUtc { get; set; } = DateTime.UtcNow;
     public int OriginalIndex { get; set; }
 }
 
 public sealed class BoardState
 {
+    public Dictionary<string, string> AiCreationCursors { get; set; } = [];
     [System.Text.Json.Serialization.JsonRequired]
     public int Version { get; set; } = 2;
     public Guid PersistenceRevision { get; set; }
@@ -198,7 +243,7 @@ public sealed class BoardState
     public List<EditSession> Sessions { get; set; } = [];
     [System.Text.Json.Serialization.JsonRequired]
     public List<FieldOption> AiOptions { get; set; } =
-    [new() { Name = "codex", Color = "#77CBB0" }, new() { Name = "dsh", Color = "#82AFF7" }, new() { Name = "workbuddy", Color = "#C1A0EB" }];
+    [new() { Name = "codex", Color = OptionPalette.Codex }, new() { Name = "dsh", Color = OptionPalette.DeepSeek }, new() { Name = "workbuddy", Color = OptionPalette.WorkBuddy }, new() { Name = "Claude", Color = OptionPalette.Claude }];
     [System.Text.Json.Serialization.JsonRequired]
     public List<FieldOption> PriorityOptions { get; set; } =
     [new() { Name = "紧急", Color = "#F28F98" }, new() { Name = "重要不紧急", Color = "#E9C582" }, new() { Name = "不重要不紧急", Color = "#93A6BE" }];
@@ -209,6 +254,305 @@ public sealed class BoardState
 public static class Copies
 {
     public static readonly JsonSerializerOptions Json = new() { WriteIndented = false, PropertyNameCaseInsensitive = false };
-    public static T Of<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToUtf8Bytes(value, Json), Json)!;
-    public static bool Same<T>(T a, T b) => JsonSerializer.Serialize(a, Json) == JsonSerializer.Serialize(b, Json);
+    public static T Of<T>(T value)
+    {
+        if (value is null) return value;
+        if (typeof(T) == typeof(WorkItem)) return (T)(object)CloneWorkItem((WorkItem)(object)value);
+        if (typeof(T) == typeof(Stage)) return (T)(object)CloneStage((Stage)(object)value);
+        if (typeof(T) == typeof(EditSession)) return (T)(object)CloneSession((EditSession)(object)value);
+        if (typeof(T) == typeof(BoardState)) return (T)(object)CloneState((BoardState)(object)value);
+        if (typeof(T) == typeof(Reminder)) return (T)(object)CloneReminder((Reminder)(object)value);
+        if (typeof(T) == typeof(CodexBinding)) return (T)(object)CloneBinding((CodexBinding)(object)value);
+        if (typeof(T) == typeof(WindowPosition)) return (T)(object)ClonePosition((WindowPosition)(object)value);
+        if (typeof(T) == typeof(Preferences)) return (T)(object)ClonePreferences((Preferences)(object)value);
+        if (typeof(T) == typeof(BoardColumn)) return (T)(object)CloneColumn((BoardColumn)(object)value);
+        if (typeof(T) == typeof(ArchivedTask)) return (T)(object)CloneArchive((ArchivedTask)(object)value);
+        if (typeof(T) == typeof(BoardHotkey)) return (T)(object)CloneHotkey((BoardHotkey)(object)value);
+        if (typeof(T) == typeof(FieldOption)) return (T)(object)CloneOption((FieldOption)(object)value);
+        if (typeof(T) == typeof(Dictionary<string, WindowPosition>)) return (T)(object)ClonePositions((Dictionary<string, WindowPosition>)(object)value);
+        return JsonSerializer.Deserialize<T>(JsonSerializer.SerializeToUtf8Bytes(value, Json), Json)!;
+    }
+
+    public static bool Same<T>(T a, T b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return false;
+        if (typeof(T) == typeof(WorkItem)) return SameWorkItem((WorkItem)(object)a, (WorkItem)(object)b);
+        if (typeof(T) == typeof(List<Guid>)) return SameGuidList((List<Guid>)(object)a, (List<Guid>)(object)b);
+        if (typeof(T) == typeof(CodexBinding)) return SameBinding((CodexBinding)(object)a, (CodexBinding)(object)b);
+        return JsonSerializer.Serialize(a, Json) == JsonSerializer.Serialize(b, Json);
+    }
+
+    private static WorkItem CloneWorkItem(WorkItem item)
+    {
+        var copy = new WorkItem
+        {
+            CompletedSinceUtc = item.CompletedSinceUtc,
+            ColumnId = item.ColumnId,
+            Codex = item.Codex is null ? null : CloneBinding(item.Codex),
+            TimerUnread = item.TimerUnread,
+            Id = item.Id,
+            Title = item.Title,
+            Lane = item.Lane,
+            Stages = item.Stages.Select(CloneStage).ToList(),
+            CurrentStageId = item.CurrentStageId,
+            AiIds = [.. item.AiIds],
+            PriorityId = item.PriorityId,
+            Reminder = CloneReminder(item.Reminder),
+            PendingReasons = [.. item.PendingReasons],
+            UpdatedUtc = item.UpdatedUtc
+        };
+        if (copy.Stages.Count > 0 && !copy.Stages.Any(x => x.IsRunning == true)
+            && (copy.Stages.FirstOrDefault(x => x.Id == copy.CurrentStageId) ?? copy.Stages[0]) is { } fallback)
+            fallback.IsRunning = true;
+        return copy;
+    }
+
+    private static Stage CloneStage(Stage stage) => new()
+    {
+        IsRunning = stage.IsRunning,
+        Codex = stage.Codex is null ? null : CloneBinding(stage.Codex),
+        Id = stage.Id,
+        Number = stage.Number,
+        Name = stage.Name,
+        Text = stage.Text
+    };
+
+    private static CodexBinding CloneBinding(CodexBinding b) => new()
+    {
+        Platform = b.Platform,
+        BoundAtUtc = b.BoundAtUtc,
+        ExternalTurnStartedUtc = b.ExternalTurnStartedUtc,
+        BindingId = b.BindingId,
+        ThreadId = b.ThreadId,
+        ThreadName = b.ThreadName,
+        RelatedSources = b.RelatedSources.Select(CloneBinding).ToList(),
+        Generation = b.Generation,
+        Phase = b.Phase,
+        AwaitingUserAction = b.AwaitingUserAction,
+        SidebarWaitingSinceUnixMs = b.SidebarWaitingSinceUnixMs,
+        SidebarWaitIdentity = b.SidebarWaitIdentity,
+        ActionTokens = [.. b.ActionTokens],
+        ActionScope = b.ActionScope,
+        ActionCycle = b.ActionCycle,
+        AcknowledgedActionTokens = [.. b.AcknowledgedActionTokens],
+        AcknowledgedActionScope = b.AcknowledgedActionScope,
+        AcknowledgedAtUnixMs = b.AcknowledgedAtUnixMs,
+        TurnId = b.TurnId,
+        SourceEpoch = b.SourceEpoch,
+        LastSequence = b.LastSequence,
+        PendingRequests = [.. b.PendingRequests],
+        PendingApprovals = [.. b.PendingApprovals],
+        PendingRequestOverflow = b.PendingRequestOverflow,
+        PreviousThreads = [.. b.PreviousThreads]
+    };
+
+    private static Reminder CloneReminder(Reminder r) => new()
+    {
+        Enabled = r.Enabled,
+        Repeat = r.Repeat,
+        NextLocal = r.NextLocal,
+        Weekday = r.Weekday,
+        Time = r.Time,
+        LastOccurrence = r.LastOccurrence
+    };
+
+    private static EditSession CloneSession(EditSession s) => new()
+    {
+        StatusSelected = s.StatusSelected,
+        CreatedUtc = s.CreatedUtc,
+        Id = s.Id,
+        TaskId = s.TaskId,
+        Original = CloneWorkItem(s.Original),
+        Working = CloneWorkItem(s.Working),
+        Visible = s.Visible,
+        Inline = s.Inline
+    };
+
+    private static ArchivedTask CloneArchive(ArchivedTask a) => new()
+    {
+        Item = CloneWorkItem(a.Item),
+        OriginalColumn = CloneColumn(a.OriginalColumn),
+        RestoreColumn = a.RestoreColumn is null ? null : CloneColumn(a.RestoreColumn),
+        ArchivedUtc = a.ArchivedUtc,
+        OriginalIndex = a.OriginalIndex
+    };
+
+    private static BoardColumn CloneColumn(BoardColumn c) => new()
+    {
+        Id = c.Id,
+        Name = c.Name,
+        BuiltinLane = c.BuiltinLane,
+        Visible = c.Visible,
+        Deleted = c.Deleted
+    };
+
+    private static WindowPosition ClonePosition(WindowPosition p) => new()
+    {
+        X = p.X,
+        Y = p.Y,
+        Width = p.Width,
+        Height = p.Height
+    };
+
+    private static Dictionary<string, WindowPosition> ClonePositions(Dictionary<string, WindowPosition> positions)
+    {
+        var copy = new Dictionary<string, WindowPosition>(positions.Count, positions.Comparer);
+        foreach (var pair in positions) copy[pair.Key] = ClonePosition(pair.Value);
+        return copy;
+    }
+
+    private static BoardHotkey CloneHotkey(BoardHotkey h) => new()
+    {
+        Enabled = h.Enabled,
+        Modifiers = h.Modifiers,
+        VirtualKey = h.VirtualKey
+    };
+
+    private static FieldOption CloneOption(FieldOption o) => new()
+    {
+        Id = o.Id,
+        Name = o.Name,
+        Color = o.Color
+    };
+
+    private static NotificationListeningOptions CloneListening(NotificationListeningOptions l) => new()
+    {
+        Enabled = l.Enabled,
+        CaptureMode = l.CaptureMode,
+        Volume = l.Volume,
+        Rules = l.Rules.Select(r => new NotificationSoundRule
+        {
+            Id = r.Id,
+            AppName = r.AppName,
+            AppId = r.AppId,
+            Enabled = r.Enabled,
+            AudioPath = r.AudioPath
+        }).ToList()
+    };
+
+    private static Preferences ClonePreferences(Preferences p)
+    {
+        var copy = new Preferences
+        {
+            CodexNotificationWaiting = p.CodexNotificationWaiting,
+            CodexBehaviorSupplement = p.CodexBehaviorSupplement,
+            AutoCreateAiTasks = p.AutoCreateAiTasks,
+            QuickAiOnAllColumns = p.QuickAiOnAllColumns,
+            CompletedChronological = p.CompletedChronological,
+            RunningFocusMode = p.RunningFocusMode,
+            AutoOpenConversationBindingWindow = p.AutoOpenConversationBindingWindow,
+            EllipsizeStageDetails = p.EllipsizeStageDetails,
+            CollapseInactiveStageDetails = p.CollapseInactiveStageDetails,
+            NewStageDefaultState = p.NewStageDefaultState,
+            PlatformPaletteVersion = p.PlatformPaletteVersion,
+            RecentColors = [.. p.RecentColors],
+            AutoArchiveCompleted = p.AutoArchiveCompleted,
+            AutoArchiveAfterDays = p.AutoArchiveAfterDays,
+            AutoDeleteArchives = p.AutoDeleteArchives,
+            InspirationQuickEntry = p.InspirationQuickEntry,
+            BallEdgeAutoHide = p.BallEdgeAutoHide,
+            Hotkey = CloneHotkey(p.Hotkey),
+            Listening = CloneListening(p.Listening),
+            Columns = p.Columns.Select(CloneColumn).ToList(),
+            GlassTransparency = p.GlassTransparency,
+            FloatingTransparency = p.FloatingTransparency,
+            BallTransparency = p.BallTransparency,
+            ResizeCorner = p.ResizeCorner,
+            BallVisible = p.BallVisible,
+            AutoStart = p.AutoStart,
+            Positions = ClonePositions(p.Positions),
+            ConnectionConfigs = new Dictionary<string, string>(p.ConnectionConfigs, p.ConnectionConfigs.Comparer),
+            MachineMarkers = new Dictionary<string, string>(p.MachineMarkers, p.MachineMarkers.Comparer)
+        };
+        foreach (var lane in new[] { Lane.Refining, Lane.Paused, Lane.Done })
+        {
+            var column = copy.Columns.FirstOrDefault(x => x.BuiltinLane == lane);
+            if (column is null) { column = BoardColumn.Defaults().Single(x => x.BuiltinLane == lane); column.Visible = false; copy.Columns.Add(column); }
+            else if (column.Deleted) { column.Deleted = false; column.Visible = false; }
+        }
+        return copy;
+    }
+
+    private static BoardState CloneState(BoardState s) => new()
+    {
+        AiCreationCursors = new Dictionary<string, string>(s.AiCreationCursors, s.AiCreationCursors.Comparer),
+        Version = s.Version,
+        PersistenceRevision = s.PersistenceRevision,
+        Archives = s.Archives.Select(CloneArchive).ToList(),
+        Tasks = s.Tasks.Select(CloneWorkItem).ToList(),
+        Sessions = s.Sessions.Select(CloneSession).ToList(),
+        AiOptions = s.AiOptions.Select(CloneOption).ToList(),
+        PriorityOptions = s.PriorityOptions.Select(CloneOption).ToList(),
+        Preferences = ClonePreferences(s.Preferences)
+    };
+
+    private static bool SameGuidList(List<Guid> a, List<Guid> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++) if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    private static bool SameStringList(List<string> a, List<string> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++) if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    private static bool SameWorkItem(WorkItem a, WorkItem b)
+    {
+        if (a.Id != b.Id || a.ColumnId != b.ColumnId || a.Lane != b.Lane || a.TimerUnread != b.TimerUnread
+            || a.CompletedSinceUtc != b.CompletedSinceUtc || a.CurrentStageId != b.CurrentStageId
+            || a.PriorityId != b.PriorityId || a.UpdatedUtc != b.UpdatedUtc
+            || !string.Equals(a.Title, b.Title, StringComparison.Ordinal)
+            || !SameGuidList(a.AiIds, b.AiIds)
+            || !SameStringList(a.PendingReasons, b.PendingReasons)
+            || !SameReminder(a.Reminder, b.Reminder)
+            || !SameBinding(a.Codex, b.Codex)
+            || a.Stages.Count != b.Stages.Count) return false;
+        for (var i = 0; i < a.Stages.Count; i++)
+        {
+            var sa = a.Stages[i]; var sb = b.Stages[i];
+            if (sa.Id != sb.Id || sa.Number != sb.Number || sa.IsRunning != sb.IsRunning
+                || !string.Equals(sa.Name, sb.Name, StringComparison.Ordinal)
+                || !string.Equals(sa.Text, sb.Text, StringComparison.Ordinal)
+                || !SameBinding(sa.Codex, sb.Codex)) return false;
+        }
+        return true;
+    }
+
+    private static bool SameReminder(Reminder a, Reminder b) =>
+        a.Enabled == b.Enabled && a.Repeat == b.Repeat && a.NextLocal == b.NextLocal
+        && a.Weekday == b.Weekday && a.Time == b.Time && a.LastOccurrence == b.LastOccurrence;
+
+    private static bool SameBinding(CodexBinding? a, CodexBinding? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return false;
+        if (a.Platform != b.Platform || a.BoundAtUtc != b.BoundAtUtc || a.ExternalTurnStartedUtc != b.ExternalTurnStartedUtc
+            || a.BindingId != b.BindingId || !string.Equals(a.ThreadId, b.ThreadId, StringComparison.Ordinal)
+            || !string.Equals(a.ThreadName, b.ThreadName, StringComparison.Ordinal) || a.Generation != b.Generation
+            || a.Phase != b.Phase || a.AwaitingUserAction != b.AwaitingUserAction
+            || a.SidebarWaitingSinceUnixMs != b.SidebarWaitingSinceUnixMs
+            || !string.Equals(a.SidebarWaitIdentity, b.SidebarWaitIdentity, StringComparison.Ordinal)
+            || !SameStringList(a.ActionTokens, b.ActionTokens)
+            || !string.Equals(a.ActionScope, b.ActionScope, StringComparison.Ordinal)
+            || a.ActionCycle != b.ActionCycle
+            || !SameStringList(a.AcknowledgedActionTokens, b.AcknowledgedActionTokens)
+            || !string.Equals(a.AcknowledgedActionScope, b.AcknowledgedActionScope, StringComparison.Ordinal)
+            || a.AcknowledgedAtUnixMs != b.AcknowledgedAtUnixMs
+            || !string.Equals(a.TurnId, b.TurnId, StringComparison.Ordinal)
+            || !string.Equals(a.SourceEpoch, b.SourceEpoch, StringComparison.Ordinal)
+            || a.LastSequence != b.LastSequence
+            || !SameStringList(a.PendingRequests, b.PendingRequests)
+            || !SameStringList(a.PendingApprovals, b.PendingApprovals)
+            || a.PendingRequestOverflow != b.PendingRequestOverflow
+            || !SameStringList(a.PreviousThreads, b.PreviousThreads)
+            || a.RelatedSources.Count != b.RelatedSources.Count) return false;
+        for (var i = 0; i < a.RelatedSources.Count; i++)
+            if (!SameBinding(a.RelatedSources[i], b.RelatedSources[i])) return false;
+        return true;
+    }
 }

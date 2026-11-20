@@ -7,8 +7,11 @@ public static partial class Validation
     public static void Check(BoardState state)
     {
         Require(state is not null && state.Version is 1 or 2, "不支持的数据版本");
+        Require(state!.AiCreationCursors is { Count: <= 100000 } && state.AiCreationCursors.All(x =>
+            x.Key.Length is > 0 and <= 300 && x.Value is { Length: > 0 and <= 1024 }), "自动建卡记录无效");
         Require(state!.Tasks is not null && state.Sessions is not null && state.AiOptions is not null && state.PriorityOptions is not null && state.Preferences is not null, "数据缺少必要字段");
         CheckOptions(state.AiOptions!); CheckOptions(state.PriorityOptions!);
+        Require(state.Preferences!.RecentColors is { Count: <= 12 } && state.Preferences.RecentColors.All(x => x is not null && ColorPattern().IsMatch(x)), "最近使用的颜色无效");
         var ai = state.AiOptions!.Select(x => x.Id).ToHashSet();
         var priority = state.PriorityOptions!.Select(x => x.Id).ToHashSet();
         Unique(state.Tasks!, x => x.Id); Unique(state.Sessions!, x => x.Id);
@@ -20,8 +23,14 @@ public static partial class Validation
         foreach (var archive in state.Archives)
         {
             CheckItem(archive.Item, ai, priority);
-            Require(archive.Item.HasContent && !ids.Contains(archive.Item.Id) && archive.Item.ColumnId is null && archive.Item.Lane is Lane.Paused or Lane.Done && archive.OriginalColumn.BuiltinLane == archive.Item.Lane && archive.OriginalColumn.Id != Guid.Empty && !string.IsNullOrWhiteSpace(archive.OriginalColumn.Name) && archive.OriginalIndex >= 0 && archive.ArchivedUtc != default, "归档任务身份或来源无效");
+            var restore = archive.RestoreColumn ?? archive.OriginalColumn;
+            Require(archive.Item.HasContent && !ids.Contains(archive.Item.Id)
+                && (archive.OriginalColumn.BuiltinLane is null || Enum.IsDefined(archive.OriginalColumn.BuiltinLane.Value))
+                && archive.OriginalColumn.Id != Guid.Empty && !string.IsNullOrWhiteSpace(archive.OriginalColumn.Name)
+                && restore.Id != Guid.Empty && !string.IsNullOrWhiteSpace(restore.Name) && restore.Contains(archive.Item)
+                && archive.OriginalIndex >= 0 && archive.ArchivedUtc != default, "归档任务身份或来源无效");
         }
+        var archiveIds = state.Archives.Select(x => x.Item.Id).ToHashSet();
         var editing = new HashSet<Guid>();
         var workingIds = new HashSet<Guid>();
         foreach (var s in state.Sessions!)
@@ -31,10 +40,11 @@ public static partial class Validation
             Require(s.TaskId is not null || s.Working.HasContent, "不允许持久保存空草稿");
             Require(s.Working.Id == s.Original.Id, "草稿编号不一致");
             Require(workingIds.Add(s.Working.Id), "草稿任务编号重复");
-            if (s.TaskId is Guid id) Require(ids.Contains(id) && editing.Add(id) && id == s.Working.Id && !s.Inline, "编辑任务引用无效或重复");
-            else Require(!ids.Contains(s.Working.Id), "草稿与正式任务重复");
+            if (s.TaskId is Guid id) Require((ids.Contains(id) || archiveIds.Contains(id)) && editing.Add(id) && id == s.Working.Id && !s.Inline, "编辑任务引用无效或重复");
+            else Require(!ids.Contains(s.Working.Id) && !archiveIds.Contains(s.Working.Id), "草稿与正式任务重复");
         }
         var p = state.Preferences!;
+        Require(Enum.IsDefined(p.NewStageDefaultState), "新建阶段默认状态无效");
         Require(p.AutoArchiveAfterDays is >= 1 and <= 36500, "自动归档天数应为1至36500的整数");
         Require(p.Hotkey is not null && p.Hotkey.IsValid, "面板快捷键无效");
         NotificationSoundRules.Check(p.Listening);
@@ -42,8 +52,15 @@ public static partial class Validation
         Require(p.Columns!.All(x => !string.IsNullOrWhiteSpace(x.Name) && (x.BuiltinLane is null || Enum.IsDefined(x.BuiltinLane.Value)) && (!x.Protected || !x.Deleted)), "列表名称或角色无效");
         Require(p.Columns.Where(x => x.BuiltinLane is not null).Select(x => x.BuiltinLane).Distinct().Count() == p.Columns.Count(x => x.BuiltinLane is not null), "列表角色重复");
         Require(Enum.GetValues<Lane>().All(lane => p.Columns.Any(x => x.BuiltinLane == lane && !x.Deleted)), "缺少受保护列表");
-        foreach (var item in state.Tasks.Concat(state.Sessions.SelectMany(x => x.TaskId is null ? (x.StatusSelected ? new[] { x.Working } : Array.Empty<WorkItem>()) : new[] { x.Original,x.Working })))
+        foreach (var item in state.Tasks.Concat(state.Sessions.Where(x => x.TaskId is null || !archiveIds.Contains(x.TaskId.Value)).SelectMany(x => x.TaskId is null ? (x.StatusSelected ? new[] { x.Working } : Array.Empty<WorkItem>()) : new[] { x.Original,x.Working })))
             Require(p.Columns.Any(x => !x.Deleted && x.Contains(item)), "任务列表引用无效");
+        foreach (var session in state.Sessions.Where(x => x.TaskId is Guid id && archiveIds.Contains(id)))
+        {
+            var archive = state.Archives.Single(x => x.Item.Id == session.TaskId);
+            foreach (var item in new[] { session.Original, session.Working })
+                Require(p.Columns.Any(x => !x.Deleted && x.Contains(item)) || archive.OriginalColumn.Contains(item)
+                    || archive.RestoreColumn?.Contains(item) == true, "归档编辑的列表引用无效");
+        }
         Require(double.IsFinite(p.GlassTransparency) && p.GlassTransparency >= 0 && p.GlassTransparency <= 100, "毛玻璃透明度应为0至100%");
         Require(double.IsFinite(p.BallTransparency) && p.BallTransparency >= 0 && p.BallTransparency <= 100, "悬浮球透明度应为0至100%");
         Require(double.IsFinite(p.FloatingTransparency) && p.FloatingTransparency >= 0 && p.FloatingTransparency <= 100, "悬浮窗口透明度应为0至100%");
@@ -62,14 +79,27 @@ public static partial class Validation
         Require(item.Stages!.All(x => x.Number >= 0 && x.Name is not null && x.Text is not null) && item.Stages.Select(x => x.Number).Distinct().Count() == item.Stages.Count, "阶段字段无效");
         Require(item.Stages.Any(x => x.IsRunning == true), BoardEngine.LastRunningStageMessage);
         Require(item.Stages.Any(x => x.Id == item.CurrentStageId), "当前阶段指针无效");
-        Require(item.Stages.Select(x => x.Number).SequenceEqual(item.Stages.Select(x => x.Number).Order()), "阶段顺序无效");
+        // Number identifies the creation ordinal; list order is independently
+        // editable. The unique nonnegative-number rule above still applies.
         Require(item.AiIds!.All(ai.Contains) && item.AiIds.Distinct().Count() == item.AiIds.Count && (item.PriorityId is null || priority.Contains(item.PriorityId.Value)), "字段选项引用无效");
         Require(item.PendingReasons!.All(x => x is not null), "待处理原因为空");
         var r = item.Reminder!;
-        foreach (var c in item.Stages.Select(x => x.Codex).Append(item.Codex).OfType<CodexBinding>())
-            Require(c.BindingId != Guid.Empty && !string.IsNullOrWhiteSpace(c.ThreadId) && c.Generation > 0 && Enum.IsDefined(c.Phase) &&
+        var roots = item.Stages.Select(x => x.Codex).Append(item.Codex).OfType<CodexBinding>().ToArray();
+        foreach (var root in roots)
+        {
+            Require(root.RelatedSources is { Count: <= 128 } && root.RelatedSources.All(x => x is not null && x.Platform == AiPlatform.Codex && x.RelatedSources is { Count: 0 }), "侧边会话状态无效");
+            Require((root.Platform == AiPlatform.Codex || root.RelatedSources.Count == 0) && root.RelatedSources.All(x => Guid.TryParseExact(x.ThreadId, "D", out _)), "侧边会话来源无效");
+            Require(root.RelatedSources.Select(x => x.ThreadId).Append(root.ThreadId).Distinct(StringComparer.Ordinal).Count() == root.RelatedSources.Count + 1, "侧边会话编号重复");
+            Require(root.Sources.Select(x => x.BindingId).Distinct().Count() == root.RelatedSources.Count + 1, "侧边会话绑定重复");
+        }
+        foreach (var c in roots.SelectMany(x => x.Sources))
+            Require(c.BindingId != Guid.Empty && Enum.IsDefined(c.Platform) && !string.IsNullOrWhiteSpace(c.ThreadId) && c.Generation > 0 && Enum.IsDefined(c.Phase) &&
                 c.PendingRequests is { Count: <= 128 } && c.PendingRequests.All(x => !string.IsNullOrEmpty(x) && x.Length <= 256) &&
-                c.PendingApprovals is { Count: <= 128 } && c.PendingApprovals.All(x => c.PendingRequests!.Contains(x)) && c.PreviousThreads is not null, "阶段Codex关联字段无效");
+                c.PendingApprovals is { Count: <= 128 } && c.PendingApprovals.All(x => c.PendingRequests!.Contains(x)) && c.PreviousThreads is not null &&
+                c.ActionCycle >= 0 && c.AcknowledgedAtUnixMs >= 0 && c.SidebarWaitIdentity is { Length: <= 1024 } &&
+                c.ActionScope is { Length: <= 1400 } && c.AcknowledgedActionScope is { Length: <= 1400 } &&
+                c.ActionTokens is { Count: <= 256 } && c.ActionTokens.All(x => x is { Length: > 0 and <= 1400 }) &&
+                c.AcknowledgedActionTokens is { Count: <= 256 } && c.AcknowledgedActionTokens.All(x => x is { Length: > 0 and <= 1400 }), "阶段Codex关联字段无效");
         Require(Enum.IsDefined(r.Repeat) && Enum.IsDefined(r.Weekday) && r.Time >= TimeSpan.Zero && r.Time < TimeSpan.FromDays(1) && r.NextLocal != default, "提醒字段无效");
     }
 

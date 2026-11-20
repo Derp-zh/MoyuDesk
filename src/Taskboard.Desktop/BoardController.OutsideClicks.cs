@@ -29,7 +29,7 @@ internal sealed partial class BoardController
     }
     private System.Collections.Generic.IEnumerable<SurfaceWindow> FloatingWindows() => taskWindows.Values.Cast<SurfaceWindow>().Append(draftStack).Concat(auxiliary).Where(x => x.FloatingAnimations).Distinct();
     internal SurfaceWindow? DismissibleWindow() => FloatingWindows()
-        .Where(x => x.ShouldRestore).OrderByDescending(x => x.WindowLayer).ThenByDescending(x => x.ActivationOrder).FirstOrDefault();
+        .Where(x => x.ShouldRestore && !ReferenceEquals(x, bindingWindow?.Surface)).OrderByDescending(x => x.WindowLayer).ThenByDescending(x => x.ActivationOrder).FirstOrDefault();
     internal bool HasFloatingWindow => FloatingWindows().Any(x => x.IsVisible || x.ShouldRestore);
     internal void ObserveWorkspaceOutsidePress(bool externalAtPress, long? generation = null, long? pressedAt = null)
     {
@@ -42,6 +42,8 @@ internal sealed partial class BoardController
     internal void ObserveOutsidePress(SurfaceWindow target, bool inside, Point screenPoint = default, long? pressedAt = null, bool leftButton = true, bool taskCard = false)
     {
         if (!Expanded || !target.ShouldRestore) return;
+        if (bindingWindow?.ContainsPoint(screenPoint) == true) { outsideTarget = null; return; }
+        bindingWindow?.ObservePress(screenPoint, pressedAt);
         if (!inside) foreach (var editor in Editors.Where(x => x.Host == target)) foreach (var picker in editor.StagePickers.Values) picker.Collapse();
         if (inside || !leftButton || taskCard) { outsideTarget = null; return; }
         var now = pressedAt ?? Environment.TickCount64;
@@ -138,8 +140,10 @@ internal sealed partial class BoardController
                 // the input owner is then more reliable than its screen position.
                 var capturedExternal = CapturedByExternalWindow(press);
                 if (!pressGate.Accept(press.Button, pressedAt, press.Source, generation) && !capturedExternal) continue;
-                var root = capturedExternal ? press.Foreground : Native.GetAncestor(WindowFromPoint(point), 2);
+                var hit = capturedExternal ? IntPtr.Zero : WindowFromPoint(point);
+                var root = capturedExternal ? press.Foreground : Native.GetAncestor(hit, 2);
                 if (root == IntPtr.Zero && IsFullscreen(press.Foreground)) root = press.Foreground;
+                if (!capturedExternal && (ImeWindowFilter.IsImeWindow(hit) || ImeWindowFilter.IsImeWindow(root))) continue;
                 GetWindowThreadProcessId(root, out var process);
                 var external = root != IntPtr.Zero && process != Environment.ProcessId;
                 if (!OwnedBy(root, ballHandle) && !ui.HasShutdownStarted)

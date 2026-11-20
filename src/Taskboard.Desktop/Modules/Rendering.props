@@ -1,0 +1,29 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../CardHeading.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CardSeparator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CompositorPixels.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ColorPickerPanel.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ColorSpectrum.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../FrameTiming.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../HintScreenPin.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../HoverCorridor.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../LiveBackdrop.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../MarqueeText.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../OptionMenuToggle.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../OrbMenuRenderer.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../QuickScroll.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../RoundedInput.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ScrollMotion.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StageRunIcon.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SurfaceContentRoot.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SurfaceWindow.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SurfaceWindow.LiveBall.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SurfaceWindow.LiveScroll.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../TaskCardLayout.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../TaskCardMotion.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Ui.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Ui.Hints.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../AdaptiveCardPanel.cs" />
+  </ItemGroup>
+</Project>

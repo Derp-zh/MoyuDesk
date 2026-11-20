@@ -38,6 +38,8 @@ internal sealed partial class BoardController
     internal void ToggleFromHotkey()
     {
         if (Expanded) { SetExpanded(false); return; }
+        appWasForeground = true;
+        SuppressForegroundCollapse(400);
         SetExpanded(true);
         foreach (var column in VisibleColumns) Native.Raise(column);
         foreach (var window in FloatingWindows().Where(x => x.ShouldRestore).OrderBy(x => x.ActivationOrder)) Native.Raise(window);

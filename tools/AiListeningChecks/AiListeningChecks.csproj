@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Taskboard.Binding.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ArtifactDir)' == ''"><ProjectReference Include="../../src/Taskboard.Desktop/Taskboard.Desktop.csproj" /></ItemGroup>
+  <ItemGroup Condition="'$(ArtifactDir)' != ''">
+    <Reference Include="Taskboard"><HintPath>$(ArtifactDir)/Taskboard.dll</HintPath></Reference>
+    <Reference Include="Taskboard.Core"><HintPath>$(ArtifactDir)/Taskboard.Core.dll</HintPath></Reference>
+    <Reference Include="System.Text.Json"><HintPath>$(ArtifactDir)/System.Text.Json.dll</HintPath></Reference>
+    <Reference Include="System.Text.Encodings.Web"><HintPath>$(ArtifactDir)/System.Text.Encodings.Web.dll</HintPath></Reference>
+    <Content Include="$(ArtifactDir)/integrations/dsh-observer.mjs" Link="integrations/dsh-observer.mjs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

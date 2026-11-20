@@ -2,7 +2,7 @@ namespace Taskboard.Core;
 
 public sealed partial class BoardEngine(BoardState state)
 {
-    private sealed record UndoEntry(WorkItem Before, WorkItem? After, int Index, bool Reorder);
+    private sealed record UndoEntry(WorkItem Before, WorkItem? After, int Index, bool Reorder, bool Archived = false);
     private readonly List<UndoEntry> undo = [];
     private sealed record RedoEntry(UndoEntry Entry, int AfterIndex);
     private readonly List<RedoEntry> redo = [];
@@ -23,7 +23,8 @@ public sealed partial class BoardEngine(BoardState state)
     {
         var existing = State.Sessions.FirstOrDefault(x => x.TaskId == id);
         if (existing is not null) { existing.Visible = true; return existing; }
-        var item = State.Tasks.First(x => x.Id == id);
+        var item = State.Tasks.FirstOrDefault(x => x.Id == id) ?? State.Archives.FirstOrDefault(x => x.Item.Id == id)?.Item
+            ?? throw new InvalidOperationException("任务已被删除。");
         if (item.TimerUnread) { item.TimerUnread = false; Notify([id]); }
         var s = new EditSession { TaskId = id, Original = Copies.Of(item), Working = Copies.Of(item), CreatedUtc = DateTime.UtcNow };
         State.Sessions.Add(s); Touch(); return s;
@@ -52,15 +53,32 @@ public sealed partial class BoardEngine(BoardState state)
         if (!edited.HasContent) throw new InvalidOperationException("请先填写名称或任务详情。");
         if (!session.StatusSelected) throw new InvalidOperationException("请先选择当前状态，再保存任务。");
         if (!edited.Stages.Any(x => x.IsRunning == true)) throw new InvalidOperationException(LastRunningStageMessage);
+        if (session.TaskId is Guid archivedId && State.Archives.Any(x => x.Item.Id == archivedId))
+            return SubmitArchived(session, recordUndo);
         WorkItem result;
         if (session.TaskId is Guid id)
         {
             var live = State.Tasks.FirstOrDefault(x => x.Id == id) ?? throw new InvalidOperationException("任务已被删除，不能继续提交。");
             result = Merge(session.Original, edited, live);
+            var extraNotified = new List<Guid>();
+            if (result.ColumnId is null && result.Lane == Lane.Running && (live.Lane != Lane.Running || live.ColumnId is not null))
+            {
+                var ackSources = result.Stages.Select(x => x.Codex).OfType<CodexBinding>().SelectMany(x => x.Sources).Where(AiAttention.IsSourcePending).ToArray();
+                AiAttention.Acknowledge(result);
+                extraNotified.Add(result.Id);
+                AcknowledgeSameConversation(ackSources, extraNotified);
+            }
             var index = State.Tasks.IndexOf(live);
             if (recordUndo && !Copies.Same(live, result)) Remember(new(Copies.Of(live), Copies.Of(result), index, live.Lane != result.Lane || live.ColumnId != result.ColumnId));
             State.Tasks[index] = result;
             if (live.Lane != result.Lane || live.ColumnId != result.ColumnId) { State.Tasks.Remove(result); State.Tasks.Add(result); }
+            CleanReferences(result);
+            result.TimerUnread = false;
+            result.UpdatedUtc = DateTime.UtcNow;
+            State.Sessions.Remove(session);
+            if (!extraNotified.Contains(result.Id)) extraNotified.Insert(0, result.Id);
+            Notify(extraNotified);
+            return result;
         }
         else
         {
@@ -111,26 +129,46 @@ public sealed partial class BoardEngine(BoardState state)
         if (original.Text != edited.Text) result.Text = edited.Text;
         if (original.Number != edited.Number) result.Number = edited.Number;
         if (original.IsRunning != edited.IsRunning) result.IsRunning = edited.IsRunning;
-        if (original.Codex?.ThreadId != edited.Codex?.ThreadId)
-            result.Codex = edited.Codex is null ? null : new CodexBinding { ThreadId = edited.Codex.ThreadId, ThreadName = edited.Codex.ThreadName,
+        if (original.Codex?.ThreadId != edited.Codex?.ThreadId || original.Codex?.Platform != edited.Codex?.Platform)
+            result.Codex = edited.Codex is null ? null : new CodexBinding { Platform = edited.Codex.Platform, ThreadId = edited.Codex.ThreadId, ThreadName = edited.Codex.ThreadName,
                 Generation = Math.Max(live.Codex?.Generation ?? 0, original.Codex?.Generation ?? 0) + 1,
                 PreviousThreads = live.Codex is null ? [] : live.Codex.PreviousThreads.Append(live.Codex.ThreadId).TakeLast(20).ToList() };
-        if (result.Codex is not null && edited.Codex is not null && original.Codex?.ThreadId == edited.Codex.ThreadId && original.Codex?.ThreadName != edited.Codex.ThreadName)
+        if (result.Codex is not null && edited.Codex is not null && original.Codex?.ThreadId == edited.Codex.ThreadId &&
+            result.Codex.ThreadId == edited.Codex.ThreadId && result.Codex.Platform == edited.Codex.Platform &&
+            live.Codex?.ThreadName == original.Codex?.ThreadName && original.Codex?.ThreadName != edited.Codex.ThreadName)
             result.Codex.ThreadName = edited.Codex.ThreadName;
         if (result.Codex is { } mergedBinding && live.Codex is { } liveBinding &&
             mergedBinding.BindingId == liveBinding.BindingId && mergedBinding.Generation == liveBinding.Generation && mergedBinding.ThreadId == liveBinding.ThreadId)
+        {
             mergedBinding.ObservedTurn = liveBinding.ObservedTurn;
+            foreach (var related in mergedBinding.RelatedSources)
+                related.ObservedTurn = liveBinding.RelatedSources.FirstOrDefault(x => x.BindingId == related.BindingId)?.ObservedTurn;
+        }
         return result;
     }
 
     public Stage AddStage(EditSession session)
     {
         var number = session.Working.Stages.Max(x => x.Number) + 1;
-        var stage = new Stage { Number = number, Name = "阶段" + number, IsRunning = false };
+        var isRunning = State.Preferences.NewStageDefaultState switch
+        {
+            NewStageDefaultState.AlwaysRunning => true,
+            NewStageDefaultState.AlwaysInactive => false,
+            _ => session.TaskId is not null
+                && !(session.Working.ColumnId is null && session.Working.Lane is Lane.Inspiration or Lane.Refining)
+        };
+        var stage = new Stage { Number = number, Name = "阶段" + number, IsRunning = isRunning };
         session.Working.Stages.Add(stage); StageSession(session); return stage;
     }
 
     public const string LastStageMessage = "至少保留一个阶段";
+    public bool ReorderStage(EditSession session, Guid stageId, int index)
+    {
+        var values = session.Working.Stages;
+        var stage = values.FirstOrDefault(x => x.Id == stageId);
+        if (stage is null || index < 0 || index >= values.Count || values.IndexOf(stage) == index) return false;
+        values.Remove(stage); values.Insert(index, stage); StageSession(session); return true;
+    }
     public bool RemoveStage(EditSession session, Guid stageId, out string? message)
     {
         var item = session.Working;
@@ -175,6 +213,13 @@ public sealed partial class BoardEngine(BoardState state)
         State.Tasks.Remove(item);
         item.Lane = lane;
         item.ColumnId = columnId; item.TimerUnread = false;
+        var acknowledged = new List<Guid> { id };
+        if (lane == Lane.Running && columnId is null && (original.Lane != Lane.Running || original.ColumnId is not null))
+        {
+            var ackSources = item.Stages.Select(x => x.Codex).OfType<CodexBinding>().SelectMany(x => x.Sources).Where(AiAttention.IsSourcePending).ToArray();
+            AiAttention.Acknowledge(item);
+            AcknowledgeSameConversation(ackSources, acknowledged);
+        }
         var target = beforeId is Guid before ? State.Tasks.FindIndex(x => x.Id == before && x.Lane == lane && x.ColumnId == columnId) : -1;
         if (target < 0)
         {
@@ -182,9 +227,25 @@ public sealed partial class BoardEngine(BoardState state)
             target = last < 0 ? State.Tasks.Count : last + 1;
         }
         State.Tasks.Insert(target, item);
-        if (index == target && original.Lane == lane && original.ColumnId == columnId && !original.TimerUnread) return;
+        if (index == target && original.Lane == lane && original.ColumnId == columnId && !original.TimerUnread && acknowledged.Count == 1) return;
         Remember(new(original, Copies.Of(item), index, true));
-        item.UpdatedUtc = DateTime.UtcNow; Notify([id]);
+        item.UpdatedUtc = DateTime.UtcNow; Notify(acknowledged);
+    }
+
+    public bool DismissReminder(Guid id)
+    {
+        var item = State.Tasks.FirstOrDefault(x => x.Id == id);
+        if (item is null) return false;
+        var hadReason = item.PendingReasons.Contains("定时提醒到期");
+        if (!item.TimerUnread && !hadReason && !item.Reminder.Enabled) return false;
+        var before = Copies.Of(item);
+        item.TimerUnread = false;
+        item.PendingReasons.RemoveAll(x => x == "定时提醒到期");
+        item.Reminder.Enabled = false;
+        item.UpdatedUtc = DateTime.UtcNow;
+        Remember(new(before, Copies.Of(item), State.Tasks.IndexOf(item), false));
+        Notify([id]);
+        return true;
     }
 
     public void Delete(Guid id)
@@ -198,6 +259,11 @@ public sealed partial class BoardEngine(BoardState state)
     {
         if (undo.Count == 0) return;
         var entry = undo[^1]; undo.RemoveAt(undo.Count - 1);
+        if (entry.Archived)
+        {
+            ReplayArchivedEdit(entry, false); redo.Add(new(entry, 0)); if (redo.Count > 20) redo.RemoveAt(0);
+            Notify([entry.Before.Id]); return;
+        }
         var live = State.Tasks.FirstOrDefault(x => x.Id == entry.Before.Id);
         redo.Add(new(entry, live is null ? -1 : State.Tasks.IndexOf(live))); if (redo.Count > 20) redo.RemoveAt(0);
         if (entry.After is null)
@@ -252,9 +318,14 @@ public sealed partial class BoardEngine(BoardState state)
     { foreach (var binding in item.Stages.Select(x => x.Codex).OfType<CodexBinding>()) ResetBinding(binding); }
     private static void ResetBinding(CodexBinding binding)
     {
-        binding.BindingId = Guid.NewGuid(); binding.Generation++; binding.Phase = CodexPhase.Unknown; binding.AwaitingUserAction = false;
+        binding.BindingId = Guid.NewGuid(); binding.BoundAtUtc = DateTime.UtcNow; binding.Generation++; binding.Phase = CodexPhase.Unknown; binding.AwaitingUserAction = false; binding.SidebarWaitingSinceUnixMs = 0;
         binding.SourceEpoch = ""; binding.TurnId = null; binding.PendingRequests.Clear(); binding.LastSequence = -1;
         binding.PendingApprovals.Clear(); binding.PendingRequestOverflow = false;
+        binding.ExternalTurnStartedUtc = default;
+        binding.ActionTokens.Clear(); binding.AcknowledgedActionTokens.Clear(); binding.SidebarWaitIdentity = ""; binding.ActionCycle = 0;
+        binding.AcknowledgedActionScope = ""; binding.AcknowledgedAtUnixMs = 0;
+        binding.ActionScope = "";
+        binding.RelatedSources.Clear();
     }
 
     public void Touch() => Dirty?.Invoke();

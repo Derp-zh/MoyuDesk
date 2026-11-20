@@ -17,6 +17,13 @@ public sealed class AtomicStore
 
     public BoardState Load()
     {
+        var state = LoadConfigured();
+        OptionPalette.Upgrade(state);
+        return state;
+    }
+
+    private BoardState LoadConfigured()
+    {
         var state = LoadBoard();
         if (ConfigurationPath is not string path || (!File.Exists(path) && !File.Exists(path + ".bak"))) return state;
         ConfigurationBackup configuration;

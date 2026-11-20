@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../Brand.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../DataPaths.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Program.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StartupLinks.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="$(MSBuildThisFileDirectory)../DeviceOnboarding.cs" /></ItemGroup>
+</Project>

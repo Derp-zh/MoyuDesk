@@ -62,7 +62,7 @@ public sealed class ConfigurationBackup
         var references = items.Concat(state.Archives.Select(x => x.Item)).ToArray();
         candidate.AiOptions = Merge(AiOptions, state.AiOptions, references.SelectMany(x => x.AiIds).ToHashSet());
         candidate.PriorityOptions = Merge(PriorityOptions, state.PriorityOptions, references.Where(x => x.PriorityId is not null).Select(x => x.PriorityId!.Value).ToHashSet());
-        Validation.Check(candidate); return candidate;
+        OptionPalette.Upgrade(candidate); Validation.Check(candidate); return candidate;
     }
     private static List<FieldOption> Merge(List<FieldOption> restored, List<FieldOption> current, HashSet<Guid> referenced)
     {

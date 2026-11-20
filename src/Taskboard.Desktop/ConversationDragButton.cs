@@ -28,13 +28,14 @@ internal sealed class ConversationDragButton : Button
         Padding = new Thickness(0); BorderThickness = new Thickness(0); Background = Ui.Brush("#01192333");
         HorizontalAlignment = HorizontalAlignment.Right; VerticalAlignment = VerticalAlignment.Center;
         HorizontalContentAlignment = HorizontalAlignment.Stretch; Cursor = Cursors.Hand;
-        ToolTip = "按住拖出列表，放到 Codex 会话后松开绑定。会短暂读取会话链接并恢复剪贴板。Esc 取消。";
+        ToolTip = "单击打开任务编辑；按住拖到 Codex 会话后松开绑定。Esc 取消拖动。";
         var border = new FrameworkElementFactory(typeof(Border));
         border.SetBinding(Border.BackgroundProperty, new System.Windows.Data.Binding(nameof(Background)) { RelativeSource = System.Windows.Data.RelativeSource.TemplatedParent });
         border.AppendChild(new FrameworkElementFactory(typeof(ContentPresenter)));
         Template = new ControlTemplate(typeof(Button)) { VisualTree = border };
         System.Windows.Automation.AutomationProperties.SetName(this, "拖动绑定会话：" + caption);
         System.Windows.Automation.AutomationProperties.SetAutomationId(this, "DragBinding." + taskId + "." + stageId);
+        Click += (_, _) => controller.ToggleTaskEditor(taskId);
         Unloaded += (_, _) => Cancel();
     }
     internal static bool Contains(DependencyObject? node)
@@ -66,13 +67,24 @@ internal sealed class ConversationDragButton : Button
         e.Handled = true;
         if (!pressed) return;
         pressed = false; var finished = drag; drag = null;
+        var inside = new Rect(RenderSize).Contains(e.GetPosition(this));
         var point = System.Windows.Forms.Cursor.Position;
         ReleaseMouseCapture();
-        if (finished is null) return; // A click never opens the task editor or starts a card drag.
+        if (finished is null)
+        {
+            if (inside) RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            return;
+        }
         try { await finished.Complete(new Point(point.X, point.Y)); }
         catch (Exception) { finished.Dispose(); Ui.Hint(this, "拖动未完成，请检查当前绑定及保存状态", !controller.Smoke, SourceColumn?.Root); }
     }
     protected override void OnLostMouseCapture(MouseEventArgs e) { base.OnLostMouseCapture(e); Cancel(); }
+    protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
+    {
+        var cursor = System.Windows.Forms.Cursor.Position;
+        if (drag is not null && controller.BindingWindow.ScrollAt(new Point(cursor.X, cursor.Y), e.Delta)) e.Handled = true;
+        else base.OnPreviewMouseWheel(e);
+    }
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     { if (e.Key == Key.Escape && pressed) { Cancel(); e.Handled = true; } else base.OnPreviewKeyDown(e); }
     protected override void OnPreviewMouseRightButtonDown(MouseButtonEventArgs e)

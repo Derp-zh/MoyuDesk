@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using Taskboard.Core;
 
 namespace Taskboard.Desktop;
 
 internal sealed partial class SettingsSurface
 {
     private TextBlock? aiSetupTitle, aiSetupNext, aiSetupDiagnostics, aiSetupVerification, aiSetupPaths, aiSetupCapabilities, aiTestResult, aiTestSummary;
-    private Button? aiInitialize, aiOpenCodex, aiTest;
+    private Button? aiInitialize, aiOpenCodex, aiTest, aiReconnect;
     private Expander? aiDiagnostics, aiTestDetails;
     private readonly List<Control> aiConfigurationControls = new();
     private bool updatingAiFields;
@@ -17,8 +18,8 @@ internal sealed partial class SettingsSurface
     {
         if (aiSetupTitle is null) return;
         var report = controller.AiSetupReport;
-        var desktopConnected = controller.Codex.TransportConnected && controller.Codex.SourceIdentityVerified;
-        var ids = controller.Engine.State.Tasks.SelectMany(x => x.Stages).Where(x => x.Codex is not null)
+        var desktopConnected = controller.Codex.MonitoringReady;
+        var ids = controller.Engine.State.Tasks.SelectMany(x => x.Stages).Where(x => x.Codex is { Platform: AiPlatform.Codex })
             .Select(x => x.Codex!.ThreadId).Distinct(StringComparer.Ordinal).ToArray();
         var capabilities = controller.Codex.Capabilities.Where(x => ids.Contains(x.ThreadId, StringComparer.Ordinal)).ToArray();
         var live = desktopConnected ? capabilities.Count(x => x.Live) : 0;
@@ -31,15 +32,21 @@ internal sealed partial class SettingsSurface
         aiSetupNext!.Text = failed ? report.Next : desktopConnected
             ? ids.Length == 0 ? "下一步：在任务阶段关联一个已有 Codex 聊天。" : "聊天状态无法确认时，会保留原有等待提醒。"
             : report.State == CodexSetupState.NotStarted ? "正常打开 Codex 后，点击检查连接。" : report.Next;
-        if (!failed && report.SourceReady && !desktopConnected)
+        if (!failed && report.SourceReady && !desktopConnected && controller.Codex.ReadMode != "local-files")
         {
             aiSetupNext.Text = "正在自动重连，也可点击检查连接。";
+        }
+        if (controller.Codex.ReadMode == "local-files" && !checking && !failed)
+        {
+            aiSetupTitle.Text = desktopConnected ? "本机记录可读" : report.SourceReady ? report.Message : "本机记录待确认";
+            aiSetupNext.Text = report.SourceReady ? report.Next : "启动后自动读取本机记录；关联聊天后可查看具体状态。";
         }
         aiSetupDiagnostics!.Text = (report.Diagnostic.Length == 0 ? "尚无本次检查记录。" : report.Diagnostic) +
             "\n当前状态：" + controller.CodexStatus + "\n读取方式：" + controller.Codex.ReadMode +
             "\n连接成功不代表所有聊天均可观察。提问、批准及实际恢复应在对应聊天发生时分别验证。";
         aiSetupVerification!.Text = controller.AiConversationVerification;
-        aiSetupCapabilities!.Text = $"聊天列表　{(report.State == CodexSetupState.CatalogUnavailable ? "暂不可用" : report.Catalog ? "本次检查可用" : "待检查")}\n本机连接　{(desktopConnected ? "已连接" : "待连接")}\n关联聊天　" +
+        aiSetupCapabilities!.Text = $"聊天列表　{(report.State == CodexSetupState.CatalogUnavailable ? "暂不可用" : report.Catalog ? "本次检查可用" : "待检查")}\n" +
+            (controller.Codex.ReadMode == "local-files" ? $"记录读取　{(desktopConnected ? "监听已启动" : "待确认，自动重试")}" : $"本机连接　{(desktopConnected ? "已连接" : "待连接")}") + "\n关联聊天　" +
             (ids.Length == 0 ? "尚未关联" : $"{live}/{ids.Length} 状态可读 · {pending}/{ids.Length} 提问／批准可读");
         aiTestResult!.Text = controller.AiConversationTest;
         var hasTest = !controller.AiConversationTest.StartsWith("尚未测试", StringComparison.Ordinal);
@@ -50,11 +57,12 @@ internal sealed partial class SettingsSurface
         var config = controller.Engine.State.Preferences.ConnectionConfigs;
         aiSetupPaths!.Text = "系统会自动寻找 Codex。只有找不到或路径失效时，才需要手动选择。";
         aiInitialize!.Content = checking ? "检查中…" : "检查连接";
-        aiInitialize.IsEnabled = !controller.AiSetupBusy;
-        aiTest!.IsEnabled = !controller.AiSetupBusy;
-        aiOpenCodex!.Visibility = report.State is CodexSetupState.NeedsOpen or CodexSetupState.NeedsReopen ? Visibility.Visible : Visibility.Collapsed;
-        aiOpenCodex.IsEnabled = !controller.AiSetupBusy;
-        foreach (var control in aiConfigurationControls) control.IsEnabled = !controller.AiSetupBusy;
+        aiInitialize.IsEnabled = !controller.AiSetupBusy && !controller.AllAiSetupBusy;
+        aiTest!.IsEnabled = !controller.AiSetupBusy && !controller.AllAiSetupBusy;
+        aiReconnect!.IsEnabled = !controller.AiSetupBusy && !controller.AllAiSetupBusy;
+        aiOpenCodex!.Visibility = Visibility.Visible;
+        aiOpenCodex.IsEnabled = !controller.AiSetupBusy && !controller.AllAiSetupBusy;
+        foreach (var control in aiConfigurationControls) control.IsEnabled = !controller.AiSetupBusy && !controller.AllAiSetupBusy;
         if (report.State is CodexSetupState.NotFound or CodexSetupState.InvalidPath or CodexSetupState.MissingCli) aiDiagnostics!.IsExpanded = true;
         updatingAiFields = true;
         try
@@ -78,6 +86,8 @@ internal sealed partial class SettingsSurface
         aiSetupCapabilities = Ui.Label("", 12, Ui.Muted); aiSetupCapabilities.Tag = "AiCapabilities"; aiSetupCapabilities.LineHeight = 24; aiSetupCapabilities.Margin = new Thickness(0, 8, 0, 10); body.Children.Add(aiSetupCapabilities);
         var actions = new WrapPanel { Margin = new Thickness(-3, 0, -3, 4) };
         aiInitialize = Ui.Button("检查连接", async () => await controller.InitializeAiPlatform(), true); aiInitialize.Tag = "AiInitialize"; actions.Children.Add(aiInitialize);
+        aiReconnect = Ui.Button("重新连接监听", async () => { if (!controller.Isolated) await controller.RestartCodex(); await controller.InitializeAiPlatform(); });
+        aiReconnect.Tag = "AiReconnectCodex"; aiReconnect.ToolTip = "恢复任务面板的本机监听，不重启 Codex，也不发送消息。"; actions.Children.Add(aiReconnect);
         aiTest = Ui.Button("测试已关联聊天", async () => await controller.TestAiConversations()); aiTest.Tag = "AiTestConversations"; actions.Children.Add(aiTest);
         aiTest.ToolTip = "仅查看已有监测结果，不额外连接聊天，不发送消息、回答问题或批准操作。";
         aiOpenCodex = Ui.Button("打开 Codex", async () => await controller.OpenCodexForInitialization()); aiOpenCodex.Tag = "AiOpenCodex"; actions.Children.Add(aiOpenCodex);

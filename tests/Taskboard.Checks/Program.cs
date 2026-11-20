@@ -11,6 +11,8 @@ Directory.CreateDirectory(root);
 var checks = new List<string>();
 void Assert(bool value, string name) { if (!value) throw new Exception("失败：" + name); checks.Add(name); }
 void Reject(Action action, string name) { try { action(); } catch (InvalidDataException) { checks.Add(name); return; } catch (JsonException) { checks.Add(name); return; } throw new Exception("未拒绝：" + name); }
+foreach (var brand in new[] { "摸鱼台", "MoyuDesk", "MoyuDesk.exe", "摸鱼台 · MoyuDesk", "即时任务看板" })
+    Assert(NotificationSoundRules.IsSelf(brand), "通知监听会过滤本程序：" + brand);
 var engine = new BoardEngine(new BoardState());
 var unassignedEngine = new BoardEngine(new BoardState());
 var unassigned = unassignedEngine.NewSession(Lane.Refining); unassigned.StatusSelected = false;
@@ -197,6 +199,7 @@ Assert(noColumnsJson.Deserialize<BoardState>()!.Preferences.Columns.Count==6,"�
 await StageRules.Run(root, Assert);
 await StageDeletionRules.Run(root, Assert);
 await ArchivePolicyRules.Run(root, Assert);
+await ArchiveEditingRules.Run(root, Assert);
 await CodexRecoveryRules.Run(root, Assert);
 await CodexStopRules.Run(root, Assert);
 await CodexQuickStopRules.Run(root, Assert);
@@ -231,6 +234,62 @@ codexTask.CurrentCodex!.Phase=CodexPhase.WaitingForApproval;
 Assert(BoardEngine.Merge(bindingOriginal,bindingEdited,codexTask).CurrentCodex!.Phase==CodexPhase.WaitingForApproval,"标题提交保留监听最新状态");
 bindingEdited.Stages[0].Codex=new CodexBinding {ThreadId="thread-2"}; var rebound=BoardEngine.Merge(bindingOriginal,bindingEdited,codexTask);
 Assert(rebound.CurrentCodex!.Generation==2 && rebound.CurrentCodex.Phase==CodexPhase.Unknown && rebound.CurrentCodex.PreviousThreads.Contains("thread-1"),"改绑提升代次并保留旧关联历史");
+
+// #12: Multiple stages / tasks bound to same session clear orange-red attention together
+{
+    var sharedThread = Guid.NewGuid().ToString("D");
+    var multiEngine = new BoardEngine(new BoardState());
+    var s1 = multiEngine.NewSession(Lane.Action);
+    s1.Working.Title = "同任务多阶段同会话";
+    var st1 = s1.Working.Stages[0]; st1.IsRunning = true; st1.Codex = new CodexBinding { Platform = AiPlatform.Codex, ThreadId = sharedThread };
+    var st2 = multiEngine.AddStage(s1); st2.IsRunning = true; st2.Codex = new CodexBinding { Platform = AiPlatform.Codex, ThreadId = sharedThread };
+    var t1 = multiEngine.Submit(s1);
+    st1 = t1.Stages[0]; st2 = t1.Stages[1];
+    var s2 = multiEngine.NewSession(Lane.Action);
+    s2.Working.Title = "跨任务同会话";
+    var t2 = multiEngine.Submit(s2);
+    var st3 = t2.Stages[0]; st3.IsRunning = true;
+    Assert(multiEngine.BindStageConversation(t2.Id, st3.Id, null, sharedThread.ToUpperInvariant(), "同会话"), "#12 跨任务绑定规范化同一会话成功");
+    var askMsg = JsonSerializer.SerializeToElement(new { method = "item/tool/requestUserInput", id = "req-1", @params = new { threadId = sharedThread, turnId = "turn-shared" } });
+    CodexState.ApplySource(t1, st1.Id, st1.Codex!.BindingId, askMsg, 1, st1.Codex.Generation, "ep-1", true);
+    CodexState.ApplySource(t1, st2.Id, st2.Codex!.BindingId, askMsg, 1, st2.Codex.Generation, "ep-1", true);
+    CodexState.ApplySource(t2, st3.Id, st3.Codex!.BindingId, askMsg, 1, st3.Codex.Generation, "ep-1", true);
+    Assert(AiAttention.IsPending(st1.Codex) && AiAttention.IsPending(st2.Codex) && AiAttention.IsPending(st3.Codex), "#12 绑定同一会话的三个阶段初始均为橙红待处理");
+    var notifiedIds = new List<Guid>();
+    multiEngine.Changed += ids => notifiedIds.AddRange(ids);
+    Assert(multiEngine.AcknowledgeStageAttention(t1.Id, st1.Id, st1.Codex.BindingId), "#12 右键确认阶段1成功");
+    Assert(!AiAttention.IsPending(st1.Codex) && !AiAttention.IsPending(st2.Codex) && !AiAttention.IsPending(st3.Codex), "#12 确认其中一阶段后，同任务及跨任务绑定同一会话的所有阶段同步消除橙红提醒");
+    Assert(notifiedIds.Contains(t1.Id) && notifiedIds.Contains(t2.Id), "#12 联动消除通知覆盖所有受影响任务");
+    var askMsg2 = JsonSerializer.SerializeToElement(new { method = "item/tool/requestUserInput", id = "req-2", @params = new { threadId = sharedThread, turnId = "turn-shared" } });
+    CodexState.ApplySource(t1, st1.Id, st1.Codex.BindingId, askMsg2, 2, st1.Codex.Generation, "ep-1", true);
+    CodexState.ApplySource(t2, st3.Id, st3.Codex.BindingId, askMsg2, 2, st3.Codex.Generation, "ep-1", true);
+    Assert(AiAttention.IsPending(st1.Codex) && AiAttention.IsPending(st3.Codex), "#12 同一会话产生新请求时重新亮起橙红");
+    multiEngine.Move(t1.Id, Lane.Running, null);
+    Assert(!AiAttention.IsPending(st1.Codex) && !AiAttention.IsPending(st3.Codex), "#12 将任务1移回进行中时跨任务绑定同一会话的阶段也同步消除橙红");
+}
+
+// #09 UnbindStageConversation & #22 DismissReminder
+{
+    var coreEngine = new BoardEngine(new BoardState());
+    var sess = coreEngine.NewSession(Lane.Running);
+    sess.Working.Title = "解绑与关闭提醒测试";
+    var thread = Guid.NewGuid().ToString("D");
+    sess.Working.Stages[0].Codex = new CodexBinding { Platform = AiPlatform.Codex, ThreadId = thread, ThreadName = "待解绑" };
+    sess.Working.Reminder = new Reminder { Enabled = true, Repeat = Repeat.Daily, Time = TimeSpan.FromHours(9), NextLocal = DateTime.Today.AddHours(9) };
+    var item = coreEngine.Submit(sess);
+    var stage = item.Stages[0];
+    Assert(!coreEngine.UnbindStageConversation(item.Id, stage.Id, Guid.NewGuid()), "#09 预期BindingId不匹配时拒绝解绑");
+    Assert(coreEngine.UnbindStageConversation(item.Id, stage.Id, stage.Codex!.BindingId) && stage.Codex is null, "#09 UnbindStageConversation成功解除绑定");
+    coreEngine.Undo();
+    item = coreEngine.State.Tasks.Single();
+    Assert(item.Stages[0].Codex?.ThreadId == thread, "#09 解绑支持撤销恢复原绑定");
+
+    var dueIds = ReminderClock.Tick(coreEngine.State, DateTime.Today.AddHours(10));
+    Assert(dueIds.Contains(item.Id) && item.TimerUnread && item.PendingReasons.Contains("定时提醒到期"), "#22 到期后红点与原因标记存在");
+    Assert(coreEngine.DismissReminder(item.Id), "#22 DismissReminder成功关闭并清除提醒");
+    Assert(!item.TimerUnread && !item.PendingReasons.Contains("定时提醒到期") && !item.Reminder.Enabled, "#22 关闭提醒后红点、待处理原因和重复提醒全部清除");
+    Assert(ReminderClock.Tick(coreEngine.State, DateTime.Today.AddDays(1).AddHours(10)).Count == 0, "#22 关闭后后续周期不再重新触发提醒");
+}
 for (var i = 0; i < 300; i++)
 {
     var s = perf.NewSession((Lane)(i % 6)); s.Working.Title = "任务" + i;

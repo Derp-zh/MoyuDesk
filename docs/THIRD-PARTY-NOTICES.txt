@@ -1,4 +1,4 @@
-即时任务看板 0.8
+摸鱼台 · MoyuDesk
 
 Default notification audio: Alarm04.wav from the user's Windows media directory,
 embedded at the user's request. This Microsoft Windows audio asset is separate
@@ -34,3 +34,8 @@ Source projects:
 https://github.com/amerkoleci/Vortice.Windows
 https://github.com/amerkoleci/Vortice.Mathematics
 https://github.com/SharpGenTools/SharpGenTools
+
+Windows UI Automation interface definitions:
+Interop.UIAutomationClient 10.19041.0, Copyright (c) 2019 Roman.
+Distributed under the MIT license reproduced above.
+Source: https://github.com/FlaUI/UIAutomation-Interop

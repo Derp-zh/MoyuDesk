@@ -1,0 +1,21 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.BindingWindow.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.ConversationDrag.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.ConversationPlatforms.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.Conversations.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationAutomationWorker.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationBindingDrag.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationBindingInput.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationBindingWindow.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationCapsuleGesture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationClipboard.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationDragButton.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationLinkResolver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationNavigator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ConversationJumpButton.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StageDetailsText.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../DshConversationTarget.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../StageConversationPicker.cs" />
+  </ItemGroup>
+</Project>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,7 +9,7 @@ namespace Taskboard.Desktop;
 // A projection of the Codex files that already exist on this machine. Reading it
 // opens no socket, starts no app-server, loads no conversation and registers no
 // stream follower, so the desktop's idle release is never affected.
-internal sealed record CodexActivity(string TurnId, string Status, long Ordinal, bool ProjectionCaughtUp, long RolloutBytes, long RolloutWriteTicks);
+internal sealed record CodexActivity(string TurnId, string Status, long Ordinal, bool ProjectionCaughtUp, long RolloutBytes, long RolloutWriteTicks, long ExecutionStartedMs = 0, long StartedAt = 0, string RolloutPath = "");
 
 internal interface ICodexActivitySource
 {
@@ -33,8 +33,9 @@ internal sealed class CodexFileActivity(string? home = null) : ICodexActivitySou
         if (!File.Exists(history)) throw new IOException("尚未找到 Codex 本地轮次记录，暂时无法在不订阅的情况下判断轮次状态；未改用订阅或联网查询。");
         var list = string.Join(",", ids.Select(x => "'" + x + "'"));
         var rollouts = new Dictionary<string, string>(StringComparer.Ordinal);
-        var turns = new Dictionary<string, (string Turn, string Status, long Ordinal)>(StringComparer.Ordinal);
+        var turns = new Dictionary<string, (string Turn, string Status, long Ordinal, long StartedAt)>(StringComparer.Ordinal);
         var offsets = new Dictionary<string, long>(StringComparer.Ordinal);
+        var executions = new Dictionary<string, (string Turn, long Started)>(StringComparer.Ordinal);
         using (var db = Database.Open(state))
             db.Query($"SELECT id,rollout_path FROM threads WHERE id IN ({list})", row =>
             {
@@ -47,14 +48,26 @@ internal sealed class CodexFileActivity(string? home = null) : ICodexActivitySou
             // snapshot. Separate autocommit statements can straddle a writer.
             db.Query("BEGIN", _ => { });
             db.Require("thread_turns", "thread_id", "turn_id", "status", "rollout_ordinal");
-            db.Query($"SELECT thread_id,turn_id,status,rollout_ordinal FROM thread_turns WHERE thread_id IN ({list}) ORDER BY rollout_ordinal DESC", row =>
+            var turnColumns = new HashSet<string>(StringComparer.Ordinal);
+            db.Query("PRAGMA table_info(thread_turns)", row => turnColumns.Add(db.Text(row, 1)));
+            var startedColumn = turnColumns.Contains("started_at") ? "started_at" : "0";
+            db.Query($"SELECT thread_id,turn_id,status,rollout_ordinal,{startedColumn} FROM thread_turns WHERE thread_id IN ({list}) ORDER BY rollout_ordinal DESC", row =>
             {
                 var id = db.Text(row, 0).ToLowerInvariant();
-                if (!turns.ContainsKey(id)) turns[id] = (db.Text(row, 1), db.Text(row, 2), db.Number(row, 3));
+                if (!turns.ContainsKey(id)) turns[id] = (db.Text(row, 1), db.Text(row, 2), db.Number(row, 3), db.Number(row, 4));
             });
             db.Require("thread_history_projection_state", "thread_id", "next_rollout_byte_offset");
             db.Query($"SELECT thread_id,next_rollout_byte_offset FROM thread_history_projection_state WHERE thread_id IN ({list})", row =>
                 offsets[db.Text(row, 0).ToLowerInvariant()] = db.Number(row, 1));
+            // Optional metadata only; no item_json or message text is selected.
+            var columns = new HashSet<string>(StringComparer.Ordinal);
+            db.Query("PRAGMA table_info(thread_items)", row => columns.Add(db.Text(row, 1)));
+            if (new[] { "thread_id", "turn_id", "item_type", "started_at_ms" }.All(columns.Contains))
+                db.Query($"SELECT thread_id,turn_id,MAX(started_at_ms) FROM thread_items WHERE thread_id IN ({list}) AND item_type = 'reasoning' GROUP BY thread_id,turn_id", row =>
+                {
+                    var id = db.Text(row, 0).ToLowerInvariant(); var started = db.Number(row, 2);
+                    if (!executions.TryGetValue(id, out var previous) || started > previous.Started) executions[id] = (db.Text(row, 1), started);
+                });
             db.Query("COMMIT", _ => { });
         }
         foreach (var (id, path) in rollouts)
@@ -72,7 +85,8 @@ internal sealed class CodexFileActivity(string? home = null) : ICodexActivitySou
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { continue; }
             // An offset beyond EOF also indicates stale/truncated projection,
             // rather than proof that this file's current generation was read.
-            result[id] = new(turn.Turn, turn.Status, turn.Ordinal, offsets.TryGetValue(id, out var offset) && offset == bytes, bytes, ticks);
+            result[id] = new(turn.Turn, turn.Status, turn.Ordinal, offsets.TryGetValue(id, out var offset) && offset == bytes, bytes, ticks,
+                executions.TryGetValue(id, out var execution) && execution.Turn == turn.Turn ? execution.Started : 0, turn.StartedAt, CodexLocalCatalog.LocalPath(path));
         }
         return result;
     }

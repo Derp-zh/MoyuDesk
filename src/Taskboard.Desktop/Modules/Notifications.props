@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationApplications.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationAudio.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationCapture.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationListeningService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../NotificationSoundLease.cs" />
+  </ItemGroup>
+</Project>

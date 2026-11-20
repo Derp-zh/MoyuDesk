@@ -21,7 +21,7 @@ internal sealed partial class BoardController
         var monitor = Forms.Screen.FromHandle(new WindowInteropHelper(Ball).Handle).Bounds;
         var scale = 96.0 / Math.Max(96, Native.GetDpiForWindow(new WindowInteropHelper(Ball).Handle));
         var totalWidth = Math.Min(area.Width - 24, monitor.Width * scale * 7 / 8);
-        var visible = VisibleColumns; var count = Math.Max(1, visible.Length);
+        var visible = ConfiguredColumns; var count = Math.Max(1, visible.Length);
         var gap = count == 1 ? 0 : Math.Min(Math.Min(24, Math.Max(12, area.Width / 50)), Math.Max(0, (totalWidth - count * 80) / (count - 1.0)));
         var width = Math.Max(80, (totalWidth - (count - 1) * gap) / count);
         var height = Math.Max(260, (area.Height - 90) * .87);
@@ -53,19 +53,27 @@ internal sealed partial class BoardController
         var values = positions.ToArray();
         return new Rect(values.Min(x => x.X), values.Min(x => x.Y), values.Max(x => x.X + x.Width) - values.Min(x => x.X), values.Max(x => x.Y + x.Height) - values.Min(x => x.Y));
     }
-    private WindowPosition ScaledDefault(WindowPosition position, Rect bounds, Rect area, double factor)
+    private WindowPosition ScaledDefault(WindowPosition position, Rect bounds, Rect area, double factor, double translateX = 0, double translateY = 0)
     {
         var dpi = Math.Max(96, Native.GetDpiForWindow(new WindowInteropHelper(Ball).Handle)) / 96.0;
         double Pixel(double value) => Math.Round(value * dpi) / dpi;
+        var scaledWidth = bounds.Width * factor;
+        var scaledHeight = bounds.Height * factor;
+        var left = Math.Clamp(area.Left + (area.Width - scaledWidth) / 2 + translateX, area.Left, Math.Max(area.Left, area.Right - scaledWidth));
+        var top = Math.Clamp(area.Top + (area.Height - scaledHeight) / 2 + translateY, area.Top, Math.Max(area.Top, area.Bottom - scaledHeight));
         return new WindowPosition
         {
-            X = Pixel(area.Left + (area.Width - bounds.Width * factor) / 2 + (position.X - bounds.Left) * factor),
-            Y = Pixel(area.Top + (area.Height - bounds.Height * factor) / 2 + (position.Y - bounds.Top) * factor),
+            X = Pixel(left + (position.X - bounds.Left) * factor),
+            Y = Pixel(top + (position.Y - bounds.Top) * factor),
             Width = Pixel(position.Width * factor), Height = Pixel(position.Height * factor)
         };
     }
     public void RestoreColumnDefault(ColumnSurface column)
     {
+        if (IsFocusColumn(column))
+        {
+            Engine.State.Preferences.Positions.Remove(FocusPositionKey(column)); ApplyFocusPositions(); Engine.Touch(); return;
+        }
         EnsureColumnDefaults(DefaultColumnPositions());
         if (!Engine.State.Preferences.Positions.TryGetValue(ColumnDefaultPrefix + column.Definition.PositionKey, out var position)) return;
         column.Place(Copies.Of(position)); Clamp(column);

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using Taskboard.Core;
 
 namespace Taskboard.Desktop;
 
@@ -13,13 +14,78 @@ internal sealed partial class BoardController
     private readonly SemaphoreSlim codexRestartGate = new(1, 1);
     internal CodexSetupReport AiSetupReport { get; private set; } = CodexSetupReport.Initial;
     internal bool AiSetupBusy { get; private set; }
+    internal bool AllAiSetupBusy { get; private set; }
+    internal string AllAiSetupStatus { get; private set; } = "一次初始化 Codex、DSH 和 Claude；未安装的平台会分别提示。";
+    private ICodexSetupEnvironment? codexCheckFixture;
+    internal void SetCodexSetupEnvironmentForChecks(ICodexSetupEnvironment environment)
+    {
+        if (!Isolated) throw new InvalidOperationException("检查夹具仅限隔离数据目录。");
+        codexCheckFixture = environment;
+    }
+    internal Task InitializeAllAi() => RunAllAi(initialize: true);
+    internal Task ConnectAllAi() => RunAllAi(initialize: false);
+    private async Task RunAllAi(bool initialize)
+    {
+        if (AllAiSetupBusy || AiSetupBusy || aiModules.Values.Any(x => x.Busy) || dataTransition || exiting) return;
+        AllAiSetupBusy = true;
+        var state = Engine.State; var results = new List<string>();
+        try
+        {
+            foreach (var platform in new[] { AiPlatform.Codex, AiPlatform.Dsh, AiPlatform.ClaudeCode })
+            {
+                if (!CodexSetupScopeValid(state)) return;
+                var name = AiState.Name(platform);
+                AllAiSetupStatus = string.Join("\n", results.Append(name + (initialize ? "：正在初始化并连接…" : "：正在连接本机监听…"))); settings?.RefreshAllAiInitialization();
+                try
+                {
+                    if (platform == AiPlatform.Codex)
+                    {
+                        if (Isolated && codexCheckFixture is null)
+                            SetAiSetupReport(new(CodexSetupState.Failed, "隔离测试未提供 Codex 初始化来源", "不会检查或修改外部正式配置。"));
+                        else await InitializeAiPlatform(codexCheckFixture);
+                    }
+                    else if (initialize) await CheckOtherAi(platform, initialize: true);
+                    else await ReconnectOtherAi(platform);
+                    if (!CodexSetupScopeValid(state)) return;
+                    if (!Isolated)
+                    {
+                        if (platform == AiPlatform.Codex)
+                        {
+                            EnsureCodexConnection();
+                            var until = DateTime.UtcNow.AddSeconds(3);
+                            while (!Codex.MonitoringReady && DateTime.UtcNow < until && CodexSetupScopeValid(state)) await Task.Delay(100);
+                        }
+                        else AiModule(platform).Observer?.Start();
+                    }
+                    if (!CodexSetupScopeValid(state)) return;
+                    string message;
+                    if (platform == AiPlatform.Codex)
+                        message = !Isolated && AiSetupReport.SourceReady && Codex.MonitoringReady ? "本机监听已连接；" + AiConversationVerification :
+                            AiSetupReport.SourceReady && !Isolated ? "配置可用，监听暂未连接；" + Codex.Status : AiSetupReport.Message;
+                    else
+                    {
+                        var module = AiModule(platform); var report = module.Report;
+                        message = !Isolated && report.Configured && module.Observer?.IsRunning == true
+                            ? "本机监听已启动；" + (report.State == AiConnectionState.NeedsOpen ? report.Next :
+                                platform == AiPlatform.ClaudeCode ? "新开或重载 Code 会话后接收事件，已有会话状态需单独确认。" : module.Observer.Status)
+                            : report.Message + (report.State == AiConnectionState.NeedsOpen ? "；" + report.Next : "");
+                    }
+                    results.Add(name + "：" + message);
+                }
+                catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
+                { results.Add(name + (initialize ? "：初始化或连接失败，" : "：连接失败，") + error.Message); }
+            }
+            AllAiSetupStatus = (initialize ? "本轮初始化与连接已结束\n" : "本轮连接已结束\n") + string.Join("\n", results);
+        }
+        finally { AllAiSetupBusy = false; settings?.RefreshAllAiInitialization(); }
+    }
     internal string AiConversationTest { get; private set; } = "查看已有监测结果，不会额外连接聊天。";
     private bool CodexSetupScopeValid(object state) => ReferenceEquals(state, Engine.State) && !exiting && !dataTransition;
     internal string AiConversationVerification
     {
         get
         {
-            var count = Engine.State.Tasks.SelectMany(x => x.Stages).Where(x => x.Codex is not null).Select(x => x.Codex!.ThreadId).Distinct().Count();
+            var count = Engine.State.Tasks.SelectMany(x => x.Stages).Where(x => x.Codex is { Platform: AiPlatform.Codex }).Select(x => x.Codex!.ThreadId).Distinct().Count();
             return count == 0 ? "具体聊天尚未验证；请在任务阶段选择已有聊天。" :
                 $"已关联 {count} 个聊天，实时可读 {Codex.Capabilities.Count(x => x.Live)} 个；本次提问／批准观察可用 {Codex.Capabilities.Count(x => x.PendingAvailable)} 个。未发生的等待和恢复不算已验证。";
         }
@@ -32,7 +98,7 @@ internal sealed partial class BoardController
     {
         if (AiSetupBusy || dataTransition || exiting) return;
         var state = Engine.State;
-        var bindings = state.Tasks.SelectMany(task => task.Stages.Where(stage => stage.Codex is not null)
+        var bindings = state.Tasks.SelectMany(task => task.Stages.Where(stage => stage.Codex is { Platform: AiPlatform.Codex })
             .Select(stage => (task.Id, Stage: stage.Id, stage.Codex!.BindingId, stage.Codex.Generation, stage.Codex.ThreadId))).ToArray();
         if (bindings.Length == 0)
         { AiConversationTest = "尚未关联聊天。请先在任务阶段选择已有 Codex 聊天，再测试；不会为验证自动创建或选择聊天。"; settings?.RefreshAiInitialization(); return; }
@@ -40,13 +106,13 @@ internal sealed partial class BoardController
         var originalConfig = new Dictionary<string, string>(state.Preferences.ConnectionConfigs);
         var threadIds = bindings.Select(x => x.ThreadId).Distinct().ToArray();
         var labels = threadIds.Select(id => string.Join("、", state.Tasks.SelectMany(task => task.Stages
-            .Where(stage => stage.Codex?.ThreadId == id).Select(stage => task.Title + " / " + stage.Name)))).ToArray();
+            .Where(stage => stage.Codex?.Platform == AiPlatform.Codex && stage.Codex.ThreadId == id).Select(stage => task.Title + " / " + stage.Name)))).ToArray();
         AiSetupBusy = true; AiConversationTest = "正在只读测试已关联聊天…"; settings?.RefreshAiInitialization();
         try
         {
             var results = inspect is not null ? await inspect(threadIds, inspector) : threadIds.Select((id, index) =>
                 CodexSetupEnvironment.DescribeSnapshot(Codex.PeekSnapshot(id), index)).ToArray();
-            var current = state.Tasks.SelectMany(task => task.Stages.Where(stage => stage.Codex is not null)
+            var current = state.Tasks.SelectMany(task => task.Stages.Where(stage => stage.Codex is { Platform: AiPlatform.Codex })
                 .Select(stage => (task.Id, Stage: stage.Id, stage.Codex!.BindingId, stage.Codex.Generation, stage.Codex.ThreadId))).ToArray();
             if (!CodexSetupScopeValid(state) || !bindings.SequenceEqual(current) ||
                 new[] { CodexInitialization.DesktopKey, CodexInitialization.CliKey, CodexInitialization.InspectorKey, "codex.endpoint" }
@@ -85,6 +151,7 @@ internal sealed partial class BoardController
             CodexInitialization.RememberPrompt(state.Preferences, "attempted");
             Engine.Touch();
             if (!await Flush()) { SetAiSetupReport(new(CodexSetupState.Failed, "配置未能保存", "请检查数据目录是否可写，再重新初始化。")); return; }
+            if (!CodexSetupScopeValid(state)) return;
             // Test environments never contact the user's Codex or spawn a real CLI.
             if (environment is null) EnsureCodexConnection();
             SetAiSetupReport(result.Report);
@@ -128,16 +195,17 @@ internal sealed partial class BoardController
         var state = Engine.State;
         CodexInitialization.RememberPrompt(state.Preferences, "shown"); Engine.Touch();
         if (!await Flush() || !CodexSetupScopeValid(state)) return null;
-        var window = new SurfaceWindow(440, 260) { Title = "初始化 AI 平台配置", SuppressActivation = Smoke };
+        var window = new SurfaceWindow(440, 300) { Title = "初始化 AI 平台配置", SuppressActivation = Smoke };
         var body = new StackPanel { Margin = new Thickness(20) };
         body.Children.Add(Ui.Label("初始化 AI 平台配置", 18));
-        body.Children.Add(Ui.Label("关联 Codex 聊天后，看板可以根据执行状态自动移列。"));
-        body.Children.Add(Ui.Label("目前仅支持 Codex。稍后也可从设置进入，不影响普通看板使用。", 12, Ui.Muted));
+        body.Children.Add(Ui.Label("关联 AI 会话后，看板可以根据执行状态自动移列。"));
+        body.Children.Add(Ui.Label("一次初始化 Codex、DSH 和 Claude。未安装或失败的平台会分别提示，不影响其他平台；稍后也可在设置中处理。", 12, Ui.Muted));
         var initialize = Ui.Button("一键初始化", async () =>
         {
             window.Destroy();
             if (!CodexSetupScopeValid(state)) return;
-            Settings(); settings!.SelectSection("AI平台接入情况"); await InitializeAiPlatform();
+            Settings(); settings!.SelectSection("AI平台接入情况");
+            await InitializeAllAi();
         }, true); initialize.Tag = "AiInitializeNow"; body.Children.Add(initialize);
         var later = Ui.Button("稍后配置", async () =>
         {

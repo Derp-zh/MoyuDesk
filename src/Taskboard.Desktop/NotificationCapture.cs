@@ -90,7 +90,8 @@ internal sealed class NotificationCapture : IDisposable
                 var appName = notification.AppInfo?.DisplayInfo?.DisplayName ?? "";
                 var appId = notification.AppInfo?.AppUserModelId ?? "";
                 var lines = notification.Notification.Visual.Bindings.SelectMany(x => x.GetTextElements()).Select(x => x.Text).Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
-                if (lines.Length > 0) Emit(new(appName, appId, lines[0], string.Join("\n", lines.Skip(1)), "Windows通知读取"));
+                if (lines.Length > 0) Emit(new(appName, appId, lines[0], string.Join("\n", lines.Skip(1)), "Windows通知读取",
+                    "winrt:" + notification.Id + ":" + notification.CreationTime.UtcTicks, notification.CreationTime));
             }
             // Replace with current IDs: CreationTime rejects historical notifications reappearing after trim.
             if (seen.Count > 5000) { seen.Clear(); foreach (var n in notifications) seen.Add(n.Id); }
@@ -137,7 +138,12 @@ internal sealed class NotificationCapture : IDisposable
                     foreach (var card in cards)
                     {
                         var fields = NotificationSoundRules.FromCombinedText(Texts(card), knownApps);
-                        if (fields.Length > 0) foreach (var field in fields) _ = dispatcher.BeginInvoke(new Action(() => Emit(field)));
+                        if (fields.Length > 0) foreach (var field in fields)
+                        {
+                            var identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(field.Title + "\n" + field.Body)));
+                            var tagged = field with { NotificationId = "uia:" + hwnd + ":" + string.Join("-", card.GetRuntimeId()) + ":" + identity };
+                            _ = dispatcher.BeginInvoke(new Action(() => Emit(tagged)));
+                        }
                         else _ = dispatcher.BeginInvoke(new Action(() => SetStatus("已发现通知，但应用来源无法确定；本条未播放")));
                     }
                 }

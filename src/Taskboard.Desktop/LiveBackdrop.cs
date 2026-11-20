@@ -15,7 +15,7 @@ using WinRT;
 
 namespace Taskboard.Desktop;
 
-internal readonly record struct GlassRegion(Rect Bounds, double VisibleFrom = 0, double Radius = 20, bool FillCornerGaps = false, bool FlatRight = false);
+internal readonly record struct GlassRegion(Rect Bounds, double VisibleFrom = 0, double Radius = 20, bool FillCornerGaps = false, bool FlatRight = false, bool FlatLeft = false);
 
 // A single top-level HWND contains the compositor backdrop and one transparent
 // WPF child surface. The child is an internal drawing/input surface, never an
@@ -35,6 +35,7 @@ internal sealed class LiveBackdrop : IDisposable
     private ContainerVisual? shownAnimation;
     private CompositionBackdropBrush brush;
     private readonly List<IDisposable> shapes = new();
+    private readonly List<ContainerVisual> regionHolders = new();
     private readonly Dictionary<(float Radius, bool Bottom, bool Left), CompositionDrawingSurface> cornerMasks = new();
     private GlassRegion[] previous = [];
     private double previousScale;
@@ -74,14 +75,35 @@ internal sealed class LiveBackdrop : IDisposable
     internal void Update(IEnumerable<GlassRegion> regions, double scale, double? tintTransparency = null)
     {
         var current = regions.ToArray(); if (scale == previousScale && tintTransparency == previousTint && current.SequenceEqual(previous)) return;
+        if (scale == previousScale && tintTransparency == previousTint && current.Length == previous.Length && regionHolders.Count == current.Length)
+        {
+            var offsetOnly = true;
+            for (var i = 0; i < current.Length; i++)
+            {
+                var a = previous[i]; var b = current[i];
+                if (a.Bounds.Width <= 0 || a.Bounds.Height <= 0 || b.Bounds.Width <= 0 || b.Bounds.Height <= 0
+                    || a.Bounds.Width != b.Bounds.Width || a.Bounds.Height != b.Bounds.Height
+                    || a.VisibleFrom != b.VisibleFrom || a.Radius != b.Radius || a.FillCornerGaps != b.FillCornerGaps
+                    || a.FlatRight != b.FlatRight || a.FlatLeft != b.FlatLeft)
+                { offsetOnly = false; break; }
+            }
+            if (offsetOnly)
+            {
+                previous = current;
+                for (var i = 0; i < current.Length; i++)
+                    regionHolders[i].Offset = new Vector3((float)(current[i].Bounds.X * scale), (float)(current[i].Bounds.Y * scale), 0);
+                _ = compositor!.RequestCommitAsync();
+                return;
+            }
+        }
         previous = current; previousScale = scale; previousTint = tintTransparency;
-        root.Children.RemoveAll(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear();
+        root.Children.RemoveAll(); regionHolders.Clear(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear();
         foreach (var region in current)
         {
             var bounds = region.Bounds; if (bounds.Width <= 0 || bounds.Height <= 0) continue;
             var holder = compositor!.CreateContainerVisual(); holder.Offset = new Vector3((float)(bounds.X * scale), (float)(bounds.Y * scale), 0);
             holder.Size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
-            AddRegionBackdrop(holder, region, scale, shapes); root.Children.InsertAtTop(holder); shapes.Add(holder);
+            AddRegionBackdrop(holder, region, scale, shapes); root.Children.InsertAtTop(holder); shapes.Add(holder); regionHolders.Add(holder);
             if (tintTransparency is double transparency)
             {
                 var paint = compositor.CreateColorBrush(Windows.UI.Color.FromArgb((byte)Math.Round(255 * (1 - transparency / 100)), 25, 35, 51));
@@ -384,15 +406,17 @@ internal sealed class LiveBackdrop : IDisposable
             }
         }
     }
-    private void ClipRounded(ContainerVisual holder, float radius, List<IDisposable> parts, bool flatRight = false)
+    private void ClipRounded(ContainerVisual holder, float radius, List<IDisposable> parts, bool flatRight = false, bool flatLeft = false)
     {
-        var geometry = CreateShape(holder.Size + new Vector2(flatRight ? radius : 0, 0), radius); var clip = compositor!.CreateGeometricClip(geometry); holder.Clip = clip;
+        var geometry = CreateShape(holder.Size + new Vector2(flatRight || flatLeft ? radius : 0, 0), radius);
+        if (flatLeft && geometry is CompositionRoundedRectangleGeometry rectangle) rectangle.Offset = new Vector2(-radius, 0);
+        var clip = compositor!.CreateGeometricClip(geometry); holder.Clip = clip;
         parts.Add(geometry); parts.Add(clip);
     }
     private void AddRegionBackdrop(ContainerVisual holder, GlassRegion region, double scale, List<IDisposable> parts, bool cornerTint = false)
     {
         var radius = (float)(region.Radius * scale); var cut = (float)(region.VisibleFrom * scale);
-        ClipRounded(holder, radius, parts, region.FlatRight);
+        ClipRounded(holder, radius, parts, region.FlatRight, region.FlatLeft);
         var glass = compositor!.CreateSpriteVisual(); glass.Size = holder.Size; glass.Brush = brush;
         var clip = compositor.CreateInsetClip(cut, 0, 0, 0); glass.Clip = clip;
         holder.Children.InsertAtBottom(glass); parts.Add(clip); parts.Add(glass);
@@ -470,7 +494,8 @@ internal sealed class LiveBackdrop : IDisposable
 internal sealed class GlassContentHost : HwndHost
 {
     internal bool AnimationHidden { get; set; }
-    internal double RightAnchoredCanvasWidth { get; set; }
+    internal double FixedCanvasWidth { get; set; }
+    internal bool AnchorCanvasRight { get; set; } = true;
     private IntPtr ownerHandle;
     [StructLayout(LayoutKind.Sequential)] private struct ClientRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out ClientRect rect);
@@ -495,16 +520,16 @@ internal sealed class GlassContentHost : HwndHost
         // The default HwndHost placement briefly moves the full text canvas
         // with the rolling shell before we right-anchor it again. Never submit
         // that intermediate translation for a fixed canvas.
-        if (RightAnchoredCanvasWidth <= 0) base.OnWindowPositionChanged(rectangle);
+        if (FixedCanvasWidth <= 0) base.OnWindowPositionChanged(rectangle);
         SynchronizeCanvas();
         if (AnimationHidden && ContentHandle != IntPtr.Zero) ShowWindow(ContentHandle,0);
     }
     internal void SynchronizeCanvas()
     {
-        if (RightAnchoredCanvasWidth <= 0 || ContentHandle == IntPtr.Zero || ownerHandle == IntPtr.Zero) return;
+        if (FixedCanvasWidth <= 0 || ContentHandle == IntPtr.Zero || ownerHandle == IntPtr.Zero) return;
         if (!GetClientRect(ownerHandle, out var client) || client.Right <= 0 || client.Bottom <= 0) return;
-        var width = (int)Math.Ceiling(RightAnchoredCanvasWidth * Native.GetDpiForWindow(ownerHandle) / 96.0);
-        Native.SetWindowPos(ContentHandle, IntPtr.Zero, client.Right - width, 0, width, client.Bottom, 0x14);
+        var width = (int)Math.Ceiling(FixedCanvasWidth * Native.GetDpiForWindow(ownerHandle) / 96.0);
+        Native.SetWindowPos(ContentHandle, IntPtr.Zero, AnchorCanvasRight ? client.Right - width : 0, 0, width, client.Bottom, 0x14);
         Native.ClearWindowRegion(ContentHandle);
     }
     protected override IntPtr WndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)

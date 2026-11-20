@@ -1,0 +1,27 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../BallSurface.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BallSurface.EdgeHide.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BallPlacement.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.Archives.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.AiCreation.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.AutomaticMoves.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.CardPresentation.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.ColumnLayout.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.Configuration.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.GameInput.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.Hotkey.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.OutsideClicks.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.TaskSwitcher.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ImeWindowFilter.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CardDragSession.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ColumnSurface.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ColumnSurface.Inline.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../GlobalHotkey.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../WorkspaceRevealBatch.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.FocusLayout.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ColumnSurface.View.cs" />
+  </ItemGroup>
+  <ItemGroup><Compile Include="$(MSBuildThisFileDirectory)../BoardController.Onboarding.cs" /><Compile Include="$(MSBuildThisFileDirectory)../OnboardingSurface.cs" /></ItemGroup>
+</Project>

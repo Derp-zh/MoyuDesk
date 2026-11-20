@@ -6,7 +6,7 @@ using System.Windows.Shapes;
 namespace Taskboard.Desktop;
 internal static class Brand
 {
-    internal const string Name = "即时任务看板";
+    internal const string Name = "摸鱼台";
     internal static Viewbox OrbGlyph()
     {
         var canvas = new Canvas { Width = 24, Height = 24 };

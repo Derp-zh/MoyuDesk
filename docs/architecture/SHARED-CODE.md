@@ -1,10 +1,8 @@
 # 共享代码职责、影响范围与回归选择
 
-核对日期2026-11-03，当前公开0.9.30。职责以定点源码核对为准，图中缺口和同名误边用源码补证；本轮Codex初始化/观察范围与回归见文末，既有0.9.22阶段/设置/提示保持。
+当前模块与验证程序位置见[IMPLEMENTATION](../IMPLEMENTATION.md)。改共享代码前列出消费者、原操作范围、本次改变和回归选择。历史版本实施与旧路线见[更新日志](../history/CHANGELOG.md)。
 
 ## 阅读方法
-
-2026-10-24接续研究不改共享产品代码及消费者：CodexLocalEvents／LocalState、Observer、CodexState、控制器选择／保存均保持。只新增磁盘工件提取、原方法受控回放和PE元数据研究工具，不加入普通启动。回归选择实际包目录、准确状态投影、重连、核心保存／多阶段／绑定保护和包内离屏初始化；没有鼠标、剪贴板或原桌面问答／批准操作。定向管道路由及无follower广播revision反例、完整外部读取缺口见[接续验收](../ACCEPTANCE-CODEX-PASSIVE-20261024.md)。
 
 先找所改入口，再选下表相关行。对每次变更记录：本次改变、必须保持的动作/范围、受影响消费者、所选检查及未验收项。只读相邻依赖，不通读全部源码或历史证据。`partial`拆文件仍共享一个类的字段，不能把文件数当成独立模块数。
 
@@ -17,23 +15,24 @@
 | [SurfaceWindow](../../src/Taskboard.Desktop/SurfaceWindow.cs)、[LiveScroll](../../src/Taskboard.Desktop/SurfaceWindow.LiveScroll.cs)、[LiveBall](../../src/Taskboard.Desktop/SurfaceWindow.LiveBall.cs)、[LiveBackdrop](../../src/Taskboard.Desktop/LiveBackdrop.cs)、[SurfaceContentRoot](../../src/Taskboard.Desktop/SurfaceContentRoot.cs) | 共用原生窗口、父子内容宿主、背景/轮廓/裁切与开合；列表、球、悬浮窗及辅助窗口共用或覆写 | 背景视觉、系统命中、WPF内部命中分别验证；固定真实画布不扩大外部范围；禁止普通开合恢复截图交接；子宿主释放与旧回调保护 |
 | [ColumnSurface](../../src/Taskboard.Desktop/ColumnSurface.cs)、[Inline](../../src/Taskboard.Desktop/ColumnSurface.Inline.cs)、[CardDragSession](../../src/Taskboard.Desktop/CardDragSession.cs)、[ColumnLayout](../../src/Taskboard.Desktop/BoardController.ColumnLayout.cs) | 列表、卡片复用、alpha1透明交互面、灵感快捷录入、拖动排序/两种缩放与恢复 | 列表空白也能右键/拖动；整组22×22矩形全区可操作；新建整轮廓；卡片手势与空白外点关闭分开 |
 | [CardHeading](../../src/Taskboard.Desktop/CardHeading.cs)、[MarqueeText](../../src/Taskboard.Desktop/MarqueeText.cs)、[TaskCardLayout](../../src/Taskboard.Desktop/TaskCardLayout.cs)、[CardSeparator](../../src/Taskboard.Desktop/CardSeparator.cs) | 名称行Measure/Arrange、先状态后会话再阶段余宽、溢出滚动/像素线；列卡片及相关预览使用 | 会话3至5中文字宽；同卡缩放重新预算、极窄装饰裁切；不因视觉改动改变根背景或卡片点击/拖动 |
-| [EditorSurface](../../src/Taskboard.Desktop/EditorSurface.cs)、[DraftStackSurface](../../src/Taskboard.Desktop/DraftStackSurface.cs)、[DraftSwitchMotion](../../src/Taskboard.Desktop/DraftSwitchMotion.cs) | 编辑副本、SaveAndClose/取消/暂存、单宿主堆叠与抽牌、ClearClosed延迟清理 | 操作表[M04](../current/M04-新建编辑与草稿.md)；真实关闭结束后才清理、快速新建取消旧清理；暂存全字段与正式保存分开 |
+| [EditorSurface](../../src/Taskboard.Desktop/EditorSurface.cs)、StageDetailsEditor、StageReorderGesture、[DraftStackSurface](../../src/Taskboard.Desktop/DraftStackSurface.cs)、[DraftSwitchMotion](../../src/Taskboard.Desktop/DraftSwitchMotion.cs) | 编辑副本、SaveAndClose/取消/暂存、单宿主堆叠与抽牌、ClearClosed延迟清理 | 操作表[M04](../current/M04-新建编辑与草稿.md)；真实关闭结束后才清理、快速新建取消旧清理；暂存全字段与正式保存分开 |
 | [OutsideClicks](../../src/Taskboard.Desktop/BoardController.OutsideClicks.cs)、[GameInput](../../src/Taskboard.Desktop/BoardController.GameInput.cs)、[GlobalHotkey](../../src/Taskboard.Desktop/GlobalHotkey.cs)、[StageConversationPicker](../../src/Taskboard.Desktop/StageConversationPicker.cs) | 捕获物理按下/前台归属、钩子及原始输入去重、系统阈值双击、菜单/阶段区边界；分派到保存、暂存或整组隐藏 | 只实际外部点击收起，不因失焦/Alt+Tab；列表卡片不当外点；不吞其他应用输入；阶段内外收起层级不同 |
 | [CardPresentation](../../src/Taskboard.Desktop/BoardController.CardPresentation.cs)、[AutomaticMoves](../../src/Taskboard.Desktop/BoardController.AutomaticMoves.cs)、[TaskCardMotion](../../src/Taskboard.Desktop/TaskCardMotion.cs)、[WorkspaceRevealBatch](../../src/Taskboard.Desktop/WorkspaceRevealBatch.cs) | 暂留阶段及人为操作整理、自动移列的退出/进入动画、共同开合准备屏障 | 人为整理与后台自动更新不同；自动状态/保存不等180ms动画；取消/反向/隐藏恢复不留重复/零高卡片；准备超时不锁死组 |
-| [CodexState](../../src/Taskboard.Core/CodexState.cs)、[Observer](../../src/Taskboard.Desktop/CodexObserver.cs)、[FileActivity](../../src/Taskboard.Desktop/CodexFileActivity.cs)、[TurnTracker](../../src/Taskboard.Desktop/CodexTurnTracker.cs)、[DesktopBridge](../../src/Taskboard.Desktop/CodexDesktopBridge.cs)、[PendingBridge](../../src/Taskboard.Desktop/CodexPendingBridge.cs) | 原身份/传输/准确轮次、结构化请求、聚合、代次/epoch和重连保护；Observer内的ICodexActivitySource给出空闲期文件投影（轮次/投影进度/rollout字节与写时间）；Controller分派事件、通知卡片与保存 | 来源验证不在控件里猜；已确认等待不被Unknown/另一运行盖过；真实恢复整卡才清红点；不扩大只读操作 |
-| [安装发现](../../src/Taskboard.Desktop/CodexInstallationDiscovery.cs)、[初始化流程](../../src/Taskboard.Desktop/CodexInitialization.cs)、[控制器入口](../../src/Taskboard.Desktop/BoardController.AiInitialization.cs)、[设置控件](../../src/Taskboard.Desktop/SettingsAiInitialization.cs) | 首次一次提示、实际连接优先、动态登记与签名身份、升级路径修复备份、观察模块合同、只读关联聊天测试；消费者为启动、设置、Observer及阶段目录 | 原服务不清空、不自动选聊天/发消息、不重启Codex；测试不发任务事件、旧绑定结果丢弃；分项能力和原桌面生命周期分开；六列、共享背景/命中/动画不改 |
+| [CodexState](../../src/Taskboard.Core/CodexState.cs)、[Observer](../../src/Taskboard.Desktop/CodexObserver.cs)、[FileActivity](../../src/Taskboard.Desktop/CodexFileActivity.cs)、[行为读取](../../src/Taskboard.Desktop/CodexBehaviorSource.cs) | 本机结构来源/准确轮次、结构化请求、前台SidebarSource/Observer.Sidebar原生控件及新执行核对、聚合、代次/epoch和重连保护；ICodexActivitySource给出只读文件投影（轮次/投影进度/rollout字节与写时间）；Controller分派事件、通知卡片与保存 | 来源验证不在控件里猜；已确认等待不被Unknown/另一运行盖过；真实恢复整卡才清红点；不扩大只读操作 |
+| [安装发现](../../src/Taskboard.Desktop/CodexInstallationDiscovery.cs)、[初始化流程](../../src/Taskboard.Desktop/CodexInitialization.cs)、[控制器入口](../../src/Taskboard.Desktop/BoardController.AiInitialization.cs)、[设置控件](../../src/Taskboard.Desktop/SettingsAiInitialization.cs) | 首次一次提示、本机目录检查、动态登记与路径身份、升级路径修复备份、只读关联聊天测试；消费者为启动、设置、Observer及阶段目录 | 原服务不清空、不自动选聊天/发消息、不重启Codex；测试不发任务事件、旧绑定结果丢弃；分项能力和原桌面生命周期分开；六列、共享背景/命中/动画不改 |
 | [ReminderClock](../../src/Taskboard.Core/ReminderClock.cs)、[Archives](../../src/Taskboard.Desktop/BoardController.Archives.cs)、[AtomicStore](../../src/Taskboard.Core/AtomicStore.cs)、[ConfigurationBackup](../../src/Taskboard.Core/ConfigurationBackup.cs)、[DataPaths](../../src/Taskboard.Desktop/DataPaths.cs) | 日历到期、完成天数/归档上限、串行写入/备份、配置隔离/路径互斥；由Controller协调定时和Flush | 到期原因和周期配置分开；未提交编辑保护；配置不含任务；数据写入不依赖动画完成；路径切换不自动合并/覆盖 |
 | [NotificationListeningService](../../src/Taskboard.Desktop/NotificationListeningService.cs)、[NotificationSoundLease](../../src/Taskboard.Desktop/NotificationSoundLease.cs)、[StartupLinks](../../src/Taskboard.Desktop/StartupLinks.cs) | 外部通知/原音租约和系统启动入口，涉及真实电脑环境 | 与纯UI、隔离数据测试分开；不误改真实声音、自启或用户Codex；真实系统效果需专项证据 |
 
 ## 已核实的关键链路
 
-0. **阶段删除与设置排版**：EditorSurface圆形X→BoardEngine.RemoveStage，仅改副本，保留最后阶段和至少一个运行，当前指针转向剩余运行阶段，经原SubmitSession链验证/合并/落盘。BoardColumns保护全部内置角色，Preferences读取旧删三列恢复隐藏，Validation保留有效剩余指针、不再要求阶段0永远存在。SettingsLayout只移动原控件分组/换行，SettingsSurface保存按钮复用Flush，不删原选项。BallSurface.EdgeHide的ApplyEdgeBadgeFrame同帧更新红点/数字，预布局避免结束帧重排，不改100ms位移、几何或输入。
+0. **阶段删除与设置排版**：EditorSurface圆形X→BoardEngine.RemoveStage，仅改副本，保留最后阶段和至少一个运行，当前指针转向剩余运行阶段，经原SubmitSession链验证/合并/落盘。BoardColumns保护全部内置角色，Preferences读取旧删三列恢复隐藏，Validation保留有效剩余指针、不再要求阶段0永远存在。SettingsLayout组织通用页，归档页显式构建自身分区和紧凑预览；原始控件处理和归档身份保护保持。SettingsSurface仅显示真实自动保存状态，原Flush失败保留并定时重试；无顶栏手动保存。BallSurface.EdgeHide的ApplyEdgeBadgeFrame同帧更新红点/数字，预布局避免结束帧重排，不改100ms位移、几何或输入。
 
 1. **正式保存**：EditorSurface.SaveAndClose → BoardController.SubmitSession/SubmitSessionLocked → 复制会话和状态、临时BoardEngine.Submit验证候选 → Store.SaveAsync先落盘 → 正式Engine.Submit合并/通知 → 成功才关闭。普通脏数据另经OnDirty/Flush延迟保存。不能把正式保存误写成“先改正式内存、等待动画后再Flush”；失败需保留窗口及输入。
 2. **外点操作**：OutsideClickObserver/原始输入 → 物理时间及输入归属/去重 → ObserveWorkspaceOutsidePress或ObserveOutsidePress → 整组隐藏、草稿暂存、编辑SaveAndClose、设置隐藏。不是统一“窗外关闭”，也不是焦点变化自动隐藏。
-3. **Codex后台变化**：桥/观察器/Tracker验证来源及轮次 → Controller.AttachCodex → CodexState.Apply → NotifyCodexChange → Engine.Notify/OnChanged/保存通知 → 自动移列动画。NotifyCodexChange先记录状态与顺序，再启动装饰动画。
+3. **Codex后台变化**：只读记录/行为观察器与前台补充核对准确会话及轮次 → Controller.AttachCodex → CodexState.Apply → NotifyCodexChange → Engine.Notify/OnChanged/保存通知 → 自动移列动画。NotifyCodexChange先记录状态与顺序，再启动装饰动画。
 4. **时间提醒**：Controller.TickReminders → ReminderClock.Tick → Engine.Notify → 保存及显示 → 动画。Codex恢复清红点由真实整卡状态决定，不能由通知/动画完成决定。
 5. **草稿生命周期**：关闭整个宿主 → 暂存编辑并布局 → DraftStackSurface.ClearClosed延迟清理；Layout/快速重开取消旧清理。抽牌的合成快照保留，不把它和普通开合真实裁切混用。
+6. **归档编辑层级**：EditorSurface.RefreshArchiveCaption按归档状态调整TaskEditorWindow：归档为2，与设置同层按激活先后显示；活动任务为1。构造及Controller.OnChanged刷新。SurfaceWindow排序、草稿/绑定/球不改；影响与真实命中、保存/取消归档及普通编辑/草稿回归见[桌面验收](../ACCEPTANCE-DESKTOP-0.9.42.md)。
 
 红点当前显式源码入口：BoardEngine.Edit打开编辑、Submit正式保存、SetStageRunning列表运行标记、Move移列会清点；CodexState.Apply仅可信实际恢复且整卡回进行中清点。此处是实现定位，不把所有鼠标点击一概解释为清点，也不因整理而改这些入口。
 
@@ -55,23 +54,47 @@
 
 表中“入口”是选择和定位用，不承诺任一入口完整覆盖该行。阅读Program.cs确认参数及副作用，始终明确隔离`--data-dir`；会占用桌面输入、切换前台或临时使用剪贴板的工具，必须按根AGENTS.md先询问用户是否方便，收到明确同意后才开始，不能只提示就执行。合成规则、离屏控件、真实鼠标/像素、原桌面生命周期分别记录，历史检查数量不能计作本次通过。
 
-## 后续维护边界
 
-0.9.24拖动绑定消费者：TaskCard原会话文字位置在普通构建包裹ConversationDragButton，不依赖试验开关；归档只读／灵感例外与名称预算保持；ConversationBindingDrag只临时隐藏其他原可见列，不改变SetExpanded/隐藏组配置，主动收起或销毁取消；BoardController.ConversationDrag和BoardEngine.ConversationBinding处理单阶段、代次、撤销及保存。新增CodexConversationMenu在松开后定位原侧栏会话/主聊天操作菜单，只调用复制深度链接；ConversationClipboard在动作前物化完整格式，动作后恢复并核对，剪贴板被其他动作改变时不覆盖。原整卡拖动、按钮、背景、系统命中、菜单位置和普通裁切保持。选择检查为名称预算/文字外空白内部命中、真实子宿主来源、窗口恢复、过期绑定、其他阶段等待/编辑合并/撤销/实际文件，以及原核心规则；本轮重点增加原桌面真实链接、实际阶段绑定和重开落盘、文字/HTML剪贴板恢复，不以旧拒绑原型数替代。详见[X01](../current/X01-拖动绑定探索.md)。
+## 当前共享变更与回归选择
 
-0.9.22消费者：EditorSurface、BoardEngine/Validation、BoardColumns/Preferences、SettingsSurface各页及SettingsLayout、BallSurface.EdgeHide。原模板/背景、系统命中、普通裁切、菜单/拖动范围不改。回归选择为StageDeletionRules/Taskboard.Checks、`--ux0922-verify`、AI初始化和数据配置整合；[本轮验收](../ACCEPTANCE-0.9.22-ux.md)区分离屏事件/WPF内部命中/确定性帧与未做的物理鼠标和真实像素。旧Ux0913位移动画失败边界不被新提示交接检查覆盖。
+列表/球预览继续共用StageDetailsText末行避让、禁用命中表面及两行下限；编辑/快捷详情焦点展开和失焦收起、原输入实例及排序实时让位保留。本轮排序Thumb仅改矢量墨迹居中，不改24DIP输入范围、捕获或提交。
 
-0.9.24只接管名称拖动入口，不改共享背景、裁切或原生透明命中。OutsideClickObserver同时服务整组、编辑器、草稿、设置和全屏输入；本次只在拖动结束记录物理时间界限，拒绝本次操作遗留的迟到点击，之后新外点仍保持原收起。新增回归选择：普通启动、子宿主来源、取消迟到结果、跨数据域拒绝、同编号保护、保存失败及重试；物理鼠标与原操作范围检查单列于[0.9.24验收](../ACCEPTANCE-0.9.24.md)。
+AiAttention集中管理事件身份、本地确认与来源状态的区别，消费者为两平台状态汇总、任务移列和逐阶段跳转颜色。确认不删除准确请求，跨未知/重连保留，下一请求/新执行后待处理重新生效；计时红点独立。BoardController.AiCreation负责候选先落盘后提交、作用域/迟到/并发保护；ConversationDiscoverySource隐藏三平台结构源与历史基线，单会话错误隔离，默认不开启。快速拖动复用原准确目标解析和同一创建事务。
 
-本次不拆类、不改其他事件/窗口范围。以后局部变更先沿上述链路圈出共享消费者，必要时再逐步分离显示/命中、隐藏/提交、真实状态/动画；是否重构由具体问题和验证结果决定。修改代码入口、消费者或检查参数时，同步更新本表，不能把这里写成与代码脱节的理想架构。
+WorkspaceRevealBatch及SurfaceWindow三个实时裁切入口用于六列、球、编辑/草稿/设置和辅助窗。准备后登记Start，全部由同一次Normal回调同步启动，避免最后参与者在Render中内联、其余Input等待。原背景、控件、100ms、超时、层次及快速反向保持；外点/球复用同一入口。真实回归含原生裁切独立进程采样、画面、标题拖动/空白右键/单列与22DIP整组缩放、新建轮廓、球透明角及取消/重开，不能只凭时钟或截图采样宣布同步。
 
-0.9.23消费者为安装发现/初始化/设置/控制器与CodexObserver、DesktopBridge、PendingBridge。改变连接发现与能力呈现，保持只读方法、绑定代次/epoch、等待优先和保存合并。回归为初始化/路径/旧地址/只读测试夹具、两代模块协议及投影、核心状态与存储；本轮不改共享表面、鼠标范围或六列动画，原桌面生命周期分开报告。
+归档正文编辑与操作继续使用原入口；仅归档页显式启用CompactArchivedPreview，隐藏活动卡片的阶段占位和跳转按钮，保留完整任务数据。日期/来源和恢复/删除包在同一外卡边界，确认及记录身份保护保持。全部活动列菜单显式允许归档；非AI球菜单恢复原层级/标签，AI统一连接保持，菜单位置仍8DIP。消费者为卡片、设置、球/托盘；具体本轮依据见[0.9.46验收](../ACCEPTANCE-0.9.46.md)。原0.9.45菜单描述已移入[历史快照](../history/20261109-0946/ARCHITECTURE-SHARED-CODE.md)。
 
-0.9.25消费者为Observer、初始化/设置、Controller阶段聚合与保存；新增CodexLocalEvents/CodexLocalState承担已有本机订阅、身份/协议/revision及无正文投影。原正常轮询改为事件驱动，不改共享表面/输入/动画。回归选核心规则、Observer/TurnTracker协议、25项本地状态投影、初始化离屏和原桌面只读当前状态/准确落盘；未测试全问答/批准生命周期和整机字节差分。见[验收](../ACCEPTANCE-0.9.25.md)。
+颜色组件ColorPickerPanel/ColorSpectrum由Rendering拥有，平台/优先级下拉及管理入口共用；候选与正式色分离，Controller核对数据/选项身份后提交并刷新引用，最近12色随偏好保存。OptionPalette只在加载和配置导入升级旧标准色及Claude默认项，复制副本不触发隐式升级。活动卡片、共享背景/动画/原命中范围不变。
 
-0.9.26：Observer/CodexCatalog/Rpc/安装发现分别承担本机状态与目录恢复；Controller.Conversations及StageConversationPicker处理操作重试/缓存/提示，ColumnSurface仅两内置角色原底部Auto行显示不拦输入文字。保持背景/裁切/标题拖动/菜单/新建/缩放/六列层次；回归启动顺序/掉线、目录reader重建、本地限定、空/失败/取消缓存、并发、离屏两列/同名自定义/恢复消失，以及等待/旧终态/编辑合并。真实启动先后及鼠标范围本轮未实测，见[验收](../ACCEPTANCE-0.9.26.md)。
+专注视图：Workspace/BoardController.FocusLayout协调有效可见角色及独立几何；ColumnSurface.View管理标题AI/完成开关、完成显示排序和多列落点；Rendering/AdaptiveCardPanel仅用于专注进行中/待操作，原单列VSP保留。SurfaceWindow对专注已完成选择原live-scroll左锚裁切，无泛光，其他列表竖向裁切保持；IsInteractive识别ButtonBase，勾选标题不拖窗。消费者为普通/专注列表、编辑及所有共享标题；原0.9.48回执只保留历史身份。本轮仅改变Done独立预留摆放及同层排序，主双窗与卡片不重排；SettingsHelp圆内命中、44DIP关闭和ColumnSurface的18DIP青色缩放图标均为局部模板，不改共享背景或输入基类。球/托盘新增同一偏好入口，不改变菜单位置。0.9.49另验41点真实输入，含多点问号、原生裁切、拖放、菜单、标题/组缩放/新建/滚轮；非零滚动420像素和快速反向由实际便携程序集专项补验。
 
-0.9.27消费者：CodexLocalCatalog／Catalog、Observer目录入口及初始化Check；目录由CLI app-server改为系统SQLite只读，不影响正常监测LocalEvents/LocalState、阶段聚合、红点／编辑合并和保存。保留控制器目录缓存／并发／重试、选择器、六列、背景、裁切、动画、鼠标和菜单范围。回归选目录原生读／WAL／路径／未知schema／失败恢复、默认Observer入口、包内实际程序集、初始化／选择／保存／重开、核心等待／多阶段／旧绑定和重连。持续订阅与闲置保留问题未解决；内存读取只做独立研究。详见[验收](../ACCEPTANCE-0.9.27.md)，不把代理捕获当完整公网计量。
-0.9.30消费者：CodexObserver／FollowPolicy、FileActivity、Core状态、初始化／安装发现及Controller设置入口；SettingsSurface／Layout／AiInitialization／Listening重排实际控件，原事件和选项保持。文件只候选与同轮终态，不再伪造执行；Peek只读已有快照，不新订阅；普通初始化不启动CLI，不以旧地址作条件。设置保留七个旧导航key、手动保存、任务／配置路径及快捷键独立应用，撤出未接入平台无效输入但不清旧值。
 
-本次不改共享Ui／SurfaceWindow、背景、透明命中、层次、动画、六列菜单或拖动绑定；设置内部布局变化由用户明确授权。回归：cleanup-0930时钟／实际观察链、文件夹具、重连／多阶段等待、核心／保存、实际包目录读取、settings-0930七页与长结果渲染、初始化／整合／原设置控件。原桌面问答／批准恢复、系统级流量、真实鼠标／多屏不冒充通过。详见[0.9.30验收](../ACCEPTANCE-0.9.30.md)。0.9.28旧路线及反例只按历史验收追溯。
+## U15共享影响与本轮回归选择
+
+Workspace的BallPlacement统一球、搜索/预览/菜单的左右和上下工作区策略；BallSurface负责位置/拖动/隐藏/持久化。Rendering仅给球增加左右固定画布锚点和FlatLeft默认关闭参数，其他列表/编辑/设置/草稿继续原裁切及层次。菜单仅目标行绘制开关，其他行操作与托盘定位保持。实机回归选择空白右键、标题拖动、22DIP组缩放、单列18DIP缩放、新建轮廓、滚动，以及两宽一窄原位开合。
+
+SettingsHelp只给七类复杂选项提供统一双图窗口；原照片字节保持，以CroppedBitmap裁区域，Root接收Escape，不修改共享背景。CardDragSession只负责跟随/会话，ColumnSurface管理唯一占位/逻辑后继，AdaptiveCardPanel保留视口虚拟化与按任务缓存高度；数据在Drop提交，取消不覆盖后台变更。
+
+Codex目录/亲缘归Codex模块，名称同步归Binding，自动发现归AiPlatforms，事件聚合与阶段确认归Core/AiState、提交/编辑合并归Tasks、来源形状校验归Domain。来源和阶段身份隔离、等待优先、重连/改绑、编辑合并、实际保存及旧事件确认均需回归，其他平台配置与事件格式保持。
+
+
+## U16共享影响与回归选择
+
+Editing/ReminderEditor替代EditorSurface旧内联日期/时间区，持有原编辑副本，只经原保存链提交；原22DIP唯一启用范围、一次/每日/每周及ReminderClock/到期/草稿排除保持。StageDetailsEditor仅把未运行空白下限恢复一行，180ms、焦点完整展开及输入实例保持。StageDetailsText消费者为列表和球预览，仅补硬换行截断的真实省略号，原逐行宽度、末行图标避让、两行下限及原文保持。
+
+Workspace/FocusLayout区分手动保持和拖动临时状态，450ms反馈后侧向收起沿原100ms实时控件裁切，双宽窗位置/卡宽/多列/非零滚动保持；CardDragSession退出清理临时状态。只选择Done侧向开合，不改其他表面背景/输入/层次。Settings关闭局部复用草稿48×40模板，帮助44DIP保持；OrbMenuRenderer按实际字体与DPI测量目标文字/开关/箭头，球与托盘共用，原8DIP定位及菜单动作保持。DeviceOnboarding独立本机原子记录，Workspace协调五步浮窗，不自动建卡或发消息。
+
+本轮回归：列表空白右键、标题拖动、22DIP组和18DIP单列缩放、卡片/新建/滚动；新建/已建保存失败/取消/切换/重启回读，提醒核心到期与错过周期；完成窄窗拖放/取消/固定/反向/模式及组隐藏，原生裁切和无白条；关闭整块命中、帮助整圆和完整双图；菜单完整文字/右侧空白/键盘及四角；教程首次/迁移/跨目录/损坏与步骤。当前桌面证据写入U16验收，不借用U15检查数。提醒日历仅局部复制模板补星期资源，不修改全局Theme；根球/托盘菜单只同步窗/行横向尺寸，按原生布局取得行高，子菜单沿原生操作。Done中间帧读取实际GetWindowRgn区域，画面按截屏前后区域包络核对，不能把父窗保持原宽误判为无动画。
+
+## 0.9.53 批次1共享影响与回归选择
+
+`RoundedInput` 统一承接全程序 `TextBox` 的圆角留白精确光标定位（基于行字符边界而非原始字符索引）、首尾行方向键跳转（跳过 `IsReadOnly`、`Key.ImeProcessed` 与通过 `EdgeArrowNavigation="False"` 关闭的时间框，检索框仅在结果为空或向上时复用）以及暗色圆角右键菜单（#EE1E2A3C 轻量半透明圆角弹窗，不引入独立 `DesktopWindowTarget` 合成树）。`StageDetailsEditor` 取消运行中阶段180DIP失焦自动收起，平衡底部内边距并在展开点击瞬间抑制初始拖选、打开右键菜单期间维持展开；`EditorSurface` 外层 `ScrollViewer` 设为 `Focusable=false` 防止点击编辑器底部抢焦点；`StageReorderGesture` 仅将 `↕` 矢量路径改为 `GetWidenedPathGeometry().GetOutlinedPathGeometry()` 单次填充以消除重叠发白，不改变24DIP命中与拖动提交契约。`Theme.xaml` 仅补充 `RadioButton` 圆角暗色样式、`ContextMenu`/`MenuItem` 快捷键列及 `StageBodyInput` 底部内边距，不改变 `SurfaceWindow` 背景或外部命中边界。
+
+## 0.9.53 批次3共享影响与回归选择
+
+- **悬浮球展开闪烁修复（#14）**：`BallSurface` 在展开准备期直接以完整可见态（`Opacity = 1`）随 `ClipHorizontal` 原生裁切展开，不再在 `Width > 64` 处突变透明度，并缓存停靠几何；`SurfaceWindow.LiveBall` 使用 `SWP_NOCOPYBITS` 并紧跟 `SetWindowPos` 更新 `ClipHorizontal` 与子画布；`LiveBackdrop.Update` 在仅平移区域坐标时就地更新 `ContainerVisual.Offset` 并请求提交，消除逐帧销毁重建毛玻璃视觉树引发的搜索框闪烁。
+- **Alt+Tab 唯一窗口与切离/切回（#15）**：`BoardController.TaskSwitcher` 引入透明代理窗 `AppSwitcherWindow` 作为本程序在任务栏/`Alt+Tab` 的唯一入口；所有 `SurfaceWindow` 维持工具窗不入切换器。切离外部应用时（排除 IME、任务切换器浮层、内部主动关窗保护期、拖拽与原生对话框）收起到悬浮球；通过 `Alt+Tab` 切回代理窗时调用 `ActivateFromTaskSwitcher` 自动展开并激活多列表/浮窗；主动关闭活动浮窗时平稳把焦点交回看板可见窗，不影响全局快捷键与多弹窗内部交互。
+- **IME 选词框免疫与全屏外点收起（#29 / #30）**：新增 `ImeWindowFilter` 按 Win32 类名、进程名（区分 `TextInputHost` 与普通 UWP 应用、排除搜狗浏览器等非输入法进程）、`WS_EX_NOACTIVATE` 及属主进程识别输入法候选框/状态栏，在 `OutsideClickObserver`、`ColumnSurface.Inline` 失焦与前台切离判断中均予免疫；同时修复 `OutsideClickObserver.CapturePress` 32 位 tick 回绕与无指针回退、补充全屏区域限位检测（`GetClipCursor`）并结合合法前台切离事件实现全屏游戏点外部关闭。
+- **长文本性能优化（#20）**：`Models` 为 `WorkItem.DisplayTitle` 移除全量换行 `Split`、为 `Copies.Of/Same` 增加复用不可变字符串的强类型深拷贝/比较（保留 `OnDeserialized` 全暂停阶段与默认列修复等价性）；`StageDetailsText` 增加了宽度/DPI 布局缓存与省略模式预截断；`TaskCardLayout.DetailsInkTop` 缓存首行墨迹测量；`StageDetailsEditor` 收起态跳过全量测量并缓存展开测量结果；`AdaptiveCardPanel.OnItemsChanged` 对增删改做增量容器维护而非 `RemoveAll()`；`TaskCard` 以无 JSON 结构快照代替序列化，`ColumnSurface` 拖动占位复用 `CardDragSession` 冻结快照并跳过无关列刷新。
+- **回归入口**：`python tools/check_project.py`、`Taskboard.Checks`、`Taskboard.Binding.Tests --batch3-surface`、`AiModulesChecks`、`AiListeningChecks` 均已离屏通过；真机 `Alt+Tab`、真实中文输入法选词框点击、真实独占/无边框全屏游戏及 `RenderProbe` 视觉帧率需后续真机桌面实测确认。

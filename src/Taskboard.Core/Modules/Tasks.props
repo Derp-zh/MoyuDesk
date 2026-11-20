@@ -1,0 +1,9 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardColumns.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardEngine.ArchiveEditing.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardEngine.ConversationBinding.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardEngine.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardEngine.History.cs" />
+  </ItemGroup>
+</Project>

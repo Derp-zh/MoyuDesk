@@ -1,0 +1,14 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.AiInitialization.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsAiInitialization.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsAiPlatforms.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsArchive.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsHotkey.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsLayout.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsListening.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsSurface.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsHelp.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../SettingsHelpImages.cs" />
+  </ItemGroup>
+</Project>

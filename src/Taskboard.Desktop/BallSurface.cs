@@ -42,7 +42,8 @@ internal sealed partial class BallSurface : SurfaceWindow
     private readonly System.Windows.Shapes.Path orbStroke;
     internal bool IsEdgeDocked => controller is not null && controller.Engine.State.Preferences.BallEdgeAutoHide;
     internal override System.Collections.Generic.IEnumerable<GlassRegion> GlassRegions() =>
-        [new(new Rect(Width - 370, 0, 370, Height), Radius: GlassRadius, FlatRight: IsEdgeDocked)];
+        [new(new Rect(expandLeft ? Width - 370 : 0, 0, 370, Height), Radius: GlassRadius,
+            FlatRight: IsEdgeDocked && !dockLeft, FlatLeft: DockedLeft)];
     protected override void ApplyGlassTint()
     {
         Root.Background = Brushes.Transparent;
@@ -54,7 +55,7 @@ internal sealed partial class BallSurface : SurfaceWindow
     {
         this.controller = controller;
         WindowLayer = 3;
-        Title = "即时任务看板入口";
+        Title = Brand.Name + "入口";
         orbFill = new System.Windows.Shapes.Path { Width=58,Height=58,HorizontalAlignment=HorizontalAlignment.Right,IsHitTestVisible = false, Fill = Ui.Brush("#99192333") };
         capsuleFill = new System.Windows.Shapes.Path { IsHitTestVisible=false,Fill=orbFill.Fill,Visibility=Visibility.Collapsed };
         Root.Children.Add(orbFill);
@@ -80,7 +81,7 @@ internal sealed partial class BallSurface : SurfaceWindow
             BorderThickness = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(2), Cursor = Cursors.Arrow };
         Root.Children.Add(orb);
         ApplyDockShape();
-        SizeChanged += (_, _) => { ApplyDockShape(); expanded.Opacity = Width > 64 ? 1 : 0; };
+        SizeChanged += (_, _) => ApplyDockShape();
         InitializeEdgeAutoHide();
         orb.MouseLeftButtonUp += (_, e) => { controller.Toggle(); e.Handled = true; };
         orb.MouseRightButtonDown += (_, e) =>
@@ -95,8 +96,8 @@ internal sealed partial class BallSurface : SurfaceWindow
             if (!dragging && DateTime.UtcNow - rightPressed >= TimeSpan.FromMilliseconds(300) && delta.Length >= 5) dragging = true;
             if (dragging)
             {
-                var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
-                var dip = transform.Transform(delta); MoveDraggedBall(originalLeft + dip.X, originalTop + dip.Y);
+                var scale = 96.0 / Math.Max(96, Native.GetDpiForWindow(new System.Windows.Interop.WindowInteropHelper(this).Handle));
+                MoveDraggedBall(originalLeft + delta.X * scale, originalTop + delta.Y * scale);
                 HidePopups();
             }
             e.Handled = true;
@@ -104,7 +105,7 @@ internal sealed partial class BallSurface : SurfaceWindow
         orb.MouseRightButtonUp += (_, e) =>
         {
             rightDown = false; orb.ReleaseMouseCapture();
-            if (dragging) { dragging = false; controller.Clamp(this); if (IsEdgeDocked) DockAtRight(); controller.SaveBall(this); Native.RaiseBall(); }
+            if (dragging) { dragging = false; PreparePlacement(); controller.SaveBall(this); Native.RaiseBall(); }
             else { HidePopups(); controller.OrbMenu(orb); } e.Handled = true;
             ResetEdgeIdle();
         };
@@ -137,57 +138,71 @@ internal sealed partial class BallSurface : SurfaceWindow
         var window = new SurfaceWindow(width, height) { FloatingAnimations = false }; window.Root.Children.Add(new ScrollViewer { Content = children,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(12) }); return window;
     }
+    internal void PrepareExpandedVisuals(bool expandedState)
+    {
+        capsuleFill.Visibility = Visibility.Visible; orbFill.Visibility = Visibility.Collapsed;
+        if (expandedState) { expanded.Visibility = Visibility.Visible; expanded.Opacity = 1; }
+    }
     public void SetExpanded(bool expandedState)
     {
         RestoreFromEdge(); ResetEdgeIdle();
         HidePopups();
-        if (IsEdgeDocked) DockAtRight();
-        else if (expandedState && !controller.Smoke)
-        {
-            var area = controller.WorkArea(this);
-            Left = Math.Clamp(Left + Width, area.Left + Math.Min(370, area.Width), area.Right) - Width;
-        }
-        var right = Left + Width;
+        PreparePlacement();
+        var orbLeft = VisibleBallLeft;
         if (!expandedState && Width <= 58 && !HasActiveMotion) { expanded.Visibility = Visibility.Collapsed; capsuleFill.Visibility=Visibility.Collapsed; orbFill.Visibility=Visibility.Visible; return; }
-        RevealToLeft(expandedState, () =>
+        RevealBall(expandedState, expandLeft, () => PrepareExpandedVisuals(expandedState), () =>
         {
-            capsuleFill.Visibility = Visibility.Visible; orbFill.Visibility = Visibility.Collapsed;
-            if (expandedState) { expanded.Visibility = Visibility.Visible; expanded.Opacity = Width > 64 ? 1 : 0; }
-        }, () =>
-        {
-            if (!expandedState) { Width = 58; Left = right - Width; expanded.Visibility = Visibility.Collapsed; controller.Clamp(this); if (IsEdgeDocked) DockAtRight(); }
-            if (expandedState) { controller.Clamp(this); if (IsEdgeDocked) DockAtRight(); }
+            if (!expandedState) { Width = 58; Left = orbLeft; expanded.Visibility = Visibility.Collapsed; }
             capsuleFill.Visibility = expandedState ? Visibility.Visible : Visibility.Collapsed; orbFill.Visibility = expandedState ? Visibility.Collapsed : Visibility.Visible;
             UpdateBadge();
+            if (placementPending) Dispatcher.BeginInvoke(new Action(() => PreparePlacement()));
         });
         UpdateBadge();
     }
     internal void ClickDuringAnimation() => controller.Toggle();
-    internal bool ContainsOrbPoint(Point point) => point.X >= Width - 58 && point.X <= Width && point.Y >= 0 && point.Y <= 58 &&
-        (IsEdgeDocked && point.X >= Width - 29 || Math.Pow(point.X - (Width - 29), 2) + Math.Pow(point.Y - 29, 2) <= 29 * 29);
+    internal bool ContainsOrbPoint(Point point)
+    {
+        var x = point.X - (expandLeft ? Width - 58 : 0);
+        return x >= 0 && x <= 58 && point.Y >= 0 && point.Y <= 58 &&
+            (IsEdgeDocked && (dockLeft ? x <= 29 : x >= 29) || Math.Pow(x - 29, 2) + Math.Pow(point.Y - 29, 2) <= 29 * 29);
+    }
     internal void MoveDraggedBall(double left, double top)
     {
         Top = top;
-        if (IsEdgeDocked) DockAtRight(); else Left = left;
+        Left = left;
     }
+    private void ApplyPlacement()
+    {
+        UseFixedBallCanvas(expandLeft);
+        orb.HorizontalAlignment = orbFill.HorizontalAlignment = expandLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        expanded.HorizontalAlignment = expandLeft ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        expanded.Width = Math.Max(1, ExpandedWidth - 64);
+        expanded.Margin = expandLeft ? new Thickness(4, 3, 60, 3) : new Thickness(60, 3, 4, 3);
+    }
+    private (bool EdgeDocked, bool DockLeft, double Height) lastDockShape = (false, false, -1);
     private void ApplyDockShape()
     {
-        ((System.Windows.Shapes.Path)orbFill).Data = BallGeometry(58, 58, IsEdgeDocked);
-        capsuleFill.Data = BallGeometry(370, Height, IsEdgeDocked);
-        if (edgeDot is not null) edgeDot.Margin = new Thickness(370 - Width + 4, 0, 0, 0);
+        if (edgeDot is not null) edgeDot.Margin = new Thickness(dockLeft ? 48 : 370 - Width + 4, 0, 0, 0);
+        var state = (IsEdgeDocked, dockLeft, Height);
+        if (lastDockShape == state) return;
+        lastDockShape = state;
+        ((System.Windows.Shapes.Path)orbFill).Data = BallGeometry(58, 58, IsEdgeDocked && !dockLeft, DockedLeft);
+        capsuleFill.Data = BallGeometry(370, Height, IsEdgeDocked && !dockLeft, DockedLeft);
         orb.Width = orb.Height = IsEdgeDocked ? 58 : 54;
         orb.Margin = new Thickness(IsEdgeDocked ? 0 : 2);
-        orb.CornerRadius = IsEdgeDocked ? new CornerRadius(29, 0, 0, 29) : new CornerRadius(27);
+        orb.CornerRadius = IsEdgeDocked ? dockLeft ? new CornerRadius(0, 29, 29, 0) : new CornerRadius(29, 0, 0, 29) : new CornerRadius(27);
         orb.Tag = "BallClickTarget";
-        orbStroke.Data = BallGeometry(orb.Width - 1, orb.Height - 1, IsEdgeDocked);
+        orbStroke.Data = BallGeometry(orb.Width - 1, orb.Height - 1, IsEdgeDocked && !dockLeft, DockedLeft);
     }
-    internal IInputElement? HitTestOrb(Point point) => Root.InputHitTest(new Point(point.X + 370 - Width, point.Y));
-    internal Point OrbPointToScreen(Point point) => Root.PointToScreen(new Point(point.X + 370 - Width, point.Y));
-    internal static Geometry BallGeometry(double width, double height, bool flatRight)
+    internal IInputElement? HitTestOrb(Point point) => ContainsOrbPoint(point) && (!IsEdgeHidden || EdgeVisibleClip.Contains(point))
+        ? Root.InputHitTest(new Point(point.X + (expandLeft ? 370 - Width : 0), point.Y)) : null;
+    internal Point OrbPointToScreen(Point point) => Root.PointToScreen(new Point(point.X + (expandLeft ? 370 - Width : 0), point.Y));
+    internal Geometry CanvasClip => BallGeometry(370, Height, IsEdgeDocked && !dockLeft, DockedLeft);
+    internal static Geometry BallGeometry(double width, double height, bool flatRight, bool flatLeft = false)
     {
         var radius = height / 2;
-        return flatRight ? new CombinedGeometry(GeometryCombineMode.Intersect,
-            new RectangleGeometry(new Rect(0, 0, width + radius, height), radius, radius),
+        return flatRight || flatLeft ? new CombinedGeometry(GeometryCombineMode.Intersect,
+            new RectangleGeometry(new Rect(flatLeft ? -radius : 0, 0, width + radius, height), radius, radius),
             new RectangleGeometry(new Rect(0, 0, width, height))) : new RectangleGeometry(new Rect(0, 0, width, height), radius, radius);
     }
     public void UpdateBadge()
@@ -202,11 +217,11 @@ internal sealed partial class BallSurface : SurfaceWindow
     public void HidePopups() { hover.Stop(); results.Hide(); preview.Hide(); }
     private void PopupPlace(SurfaceWindow window)
     {
-        var area = controller.WorkArea(this); window.Left = Math.Clamp(Left + Width - window.Width, area.Left, Math.Max(area.Left, area.Right - window.Width));
-        var available = Top - area.Top - 8;
-        if (available >= 120) { window.Height = Math.Min(340, available); window.Top = Top - window.Height - 8; }
-        else { window.Height = Math.Min(340, Math.Max(120, area.Bottom - Top - Height - 8)); window.Top = Top + Height + 8; }
-        controller.Clamp(window); window.Show(); Native.RaiseBall();
+        var area = AvailableArea();
+        var anchor = new Rect(Left, Top, Width, Height);
+        var rect = BallPlacement.Vertical(anchor, new Size(window.Width, 340), area);
+        window.Place(new WindowPosition { X = rect.Left, Y = rect.Top, Width = rect.Width, Height = rect.Height });
+        window.Show(); Native.RaiseBall();
     }
     private void ShowResults()
     {
@@ -223,12 +238,19 @@ internal sealed partial class BallSurface : SurfaceWindow
         foreach (var task in tasks)
         {
             var body = new StackPanel(); var title = Ui.Label(task.DisplayTitle, 13); title.FontWeight = FontWeights.SemiBold; body.Children.Add(title);
-            var detail = Ui.Label(string.Join("\n", BoardEngine.CardStages(task).Select(x => x.Text)), 12, Ui.Muted); detail.MaxHeight = 70; detail.TextTrimming = TextTrimming.CharacterEllipsis; body.Children.Add(detail);
+            foreach (var stage in BoardEngine.CardStages(task))
+                body.Children.Add(ConversationJumpButton.Details(controller, task, stage, 12, Ui.Muted, true, 70));
             var tags = new WrapPanel();
             foreach (var ai in controller.Engine.State.AiOptions.Where(x => task.AiIds.Contains(x.Id))) tags.Children.Add(Ui.Pill(ai.Name, ai.Color));
             var priority = controller.Engine.State.PriorityOptions.FirstOrDefault(x => x.Id == task.PriorityId);
             if (priority is not null) tags.Children.Add(Ui.Pill(priority.Name, priority.Color)); body.Children.Add(tags);
             var button = Ui.Button("", () => { preview.Hide(); controller.Locate(task.Id); }); button.Content = body; button.HorizontalContentAlignment = HorizontalAlignment.Left;
+            button.PreviewMouseDown += (_, e) =>
+            {
+                if (!ConversationJumpButton.Contains(e.OriginalSource as DependencyObject)) return;
+                for (var node = e.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+                    if (node is ConversationJumpButton jump && !jump.IsEnabled) { e.Handled = true; break; }
+            };
             previewItems.Children.Add(button);
         }
         PopupPlace(preview);

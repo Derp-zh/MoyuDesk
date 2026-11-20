@@ -1,0 +1,8 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardHotkey.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Models.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../OptionPalette.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../Validation.cs" />
+  </ItemGroup>
+</Project>

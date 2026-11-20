@@ -20,7 +20,8 @@ public sealed class NotificationListeningOptions
     public List<NotificationSoundRule> Rules { get; set; } = [];
 }
 
-public sealed record CapturedNotification(string AppName, string AppId, string Title, string Body, string Source);
+public sealed record CapturedNotification(string AppName, string AppId, string Title, string Body, string Source,
+    string NotificationId = "", DateTimeOffset? CreatedAt = null);
 
 public static class NotificationSoundRules
 {
@@ -47,7 +48,7 @@ public static class NotificationSoundRules
         return named.Length == 1 && named[0].Enabled ? named[0] : null;
     }
 
-    public static bool IsSelf(string name) => new[] { "即时任务看板", "Taskboard", "PersonalTaskBoard", "任务提醒" }.Any(x => SameName(x, name));
+    public static bool IsSelf(string name) => new[] { "摸鱼台 · MoyuDesk", "摸鱼台", "MoyuDesk", "即时任务看板", "Taskboard", "PersonalTaskBoard", "任务提醒" }.Any(x => SameName(x, name));
 
     public static CapturedNotification? FromText(IEnumerable<string> texts, string source = "辅助功能", IEnumerable<string>? knownApps = null)
     {

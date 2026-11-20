@@ -19,6 +19,9 @@ namespace Taskboard.Desktop;
 
 internal partial class SurfaceWindow : Window
 {
+    // 0: original centered reveal; -1: grow from left; 1: grow from right.
+    internal virtual int HorizontalRevealAnchor => 0;
+    internal virtual bool SidewaysListReveal => false;
     public readonly Grid Root = new SurfaceContentRoot();
     private bool allowClose;
     private bool activateWhenShown;
@@ -54,6 +57,7 @@ internal partial class SurfaceWindow : Window
     }
     internal bool ShouldRestore => scrollRunning ? scrollTo > 0 : IsVisible;
     internal event Action? BeforeOpen;
+    internal event Action? BeforeHide;
     internal double ScrollProgress => scrollRunning ? ScrollMotion.Progress(scrollFrom, scrollTo, scrollClock.Elapsed.TotalMilliseconds, scrollDuration) : IsVisible ? 1 : 0;
     internal double ScrollLight => scrollRunning ? ScrollMotion.Light(scrollClock.Elapsed.TotalMilliseconds / Math.Max(1, scrollDuration), scrollTo == 1, scrollStartLight) : 0;
     internal bool CanInterruptTaskOpening => !scrollRunning || scrollTo <= 0 ||
@@ -70,8 +74,18 @@ internal partial class SurfaceWindow : Window
     }
     private void ShowImmediately() {if(!animating) {Root.Opacity=1;contentHost.Visibility=Visibility.Visible;backdrop?.SetVisible(true);} base.Show();if(!animating)Native.ShowWindow(ContentHandle,4);if(activateWhenShown){activateWhenShown=false;base.Activate();}Native.RaiseBall();}
     public new bool Activate() { if (SuppressActivation) { ActivationOrder = ++activationSequence; return false; } if (!IsVisible) { activateWhenShown = true; ActivationOrder = ++activationSequence; return false; } return base.Activate(); }
+    internal static event Action<SurfaceWindow>? AnyWindowActivated;
+    internal static event Action<SurfaceWindow>? AnyActiveWindowHiding;
+    private void NotifyActiveHidingIfNeeded()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (IsActive || (handle != IntPtr.Zero && Native.GetForegroundWindow() == handle))
+            AnyActiveWindowHiding?.Invoke(this);
+    }
     public new void Hide()
     {
+        NotifyActiveHidingIfNeeded();
+        BeforeHide?.Invoke();
         activateWhenShown = false;
         if (ScrollEnabled && IsVisible) { RevealScroll(false); return; }
         HideImmediately();
@@ -138,10 +152,11 @@ internal partial class SurfaceWindow : Window
     internal double TaskOpeningElapsedMs => scrollClock.IsRunning ? scrollClock.Elapsed.TotalMilliseconds : -1;
     internal IntPtr ContentHandle => contentHost.ContentHandle;
     internal Rect LiveContentBounds => Native.ScreenBounds(ContentHandle);
-    protected void UseFixedBallCanvas()
+    protected void UseFixedBallCanvas(bool anchoredRight = true)
     {
-        Root.Width = 370; contentHost.Width = 370; contentHost.HorizontalAlignment = HorizontalAlignment.Right;
-        contentHost.RightAnchoredCanvasWidth = 370;
+        Root.Width = 370; contentHost.Width = 370;
+        contentHost.HorizontalAlignment = anchoredRight ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+        contentHost.FixedCanvasWidth = 370; contentHost.AnchorCanvasRight = anchoredRight; contentHost.SynchronizeCanvas();
     }
     internal virtual double GlassTransparency => FloatingTransparency;
     internal double GlassRadius => this is BallSurface ? Height / 2 : 20;
@@ -168,7 +183,7 @@ internal partial class SurfaceWindow : Window
             HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(CompositionChanged);
             Native.ClipWindow(this, Height);
         };
-        Activated += (_, _) => { ActivationOrder = ++activationSequence; Native.RaiseBall(); };
+        Activated += (_, _) => { ActivationOrder = ++activationSequence; Native.RaiseBall(); AnyWindowActivated?.Invoke(this); };
         IsVisibleChanged += (_, _) => { if (IsVisible) Native.RaiseBall(); };
         SizeChanged += (_, _) => { UpdateGlassGeometry(); if (!animating) Native.ClipWindow(this, ActualHeight); };
         DpiChanged += (_, _) => { UpdateGlassGeometry(); if (!animating) Native.ClipWindow(this, Height); };
@@ -179,6 +194,10 @@ internal partial class SurfaceWindow : Window
     }
     private IntPtr CompositionChanged(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        // Reanchor the native child before WPF handles the parent's size change
+        // and performs layout. Waiting until after layout exposed shifted text
+        // for several milliseconds on every leftward reveal frame.
+        if (message == 0x0047 && this is BallSurface) contentHost.SynchronizeCanvas();
         if (message == 0x0046 && updatingBallBounds && lParam != IntPtr.Zero)
         {
             var position = Marshal.PtrToStructure<WindowPos>(lParam);
@@ -203,13 +222,15 @@ internal partial class SurfaceWindow : Window
             var packed = lParam.ToInt64(); var p = new Point((short)(packed & 0xffff),(short)((packed >> 16)&0xffff));
             var bounds = Native.ScreenBounds(this); var radius = bounds.Height/2;
             var x = Math.Clamp(p.X,bounds.Left+radius,bounds.Right-radius); var y = bounds.Top+radius;
-            if (!(entry.IsEdgeDocked && p.X >= bounds.Right - radius) && (p.X-x)*(p.X-x)+(p.Y-y)*(p.Y-y)>radius*radius) { handled = true; return new IntPtr(-1); }
+            var flat = entry.IsEdgeDocked && (entry.DockedLeft ? p.X <= bounds.Left + radius : p.X >= bounds.Right - radius);
+            if (!flat && (p.X-x)*(p.X-x)+(p.Y-y)*(p.Y-y)>radius*radius) { handled = true; return new IntPtr(-1); }
         }
         return IntPtr.Zero;
     }
     public void Destroy() => Destroy(true);
     public void Destroy(bool animate)
     {
+        NotifyActiveHidingIfNeeded();
         if (animate && ScrollEnabled && IsVisible) { destroyAfterScroll = true; RevealScroll(false); return; }
         HideImmediately(); allowClose = true; motion++; Close();
     }
@@ -225,7 +246,8 @@ internal partial class SurfaceWindow : Window
     internal static bool IsInteractive(DependencyObject? source)
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
-            if (current is Button or TextBox or ComboBox) return true;
+            if (current is System.Windows.Controls.Primitives.ButtonBase or TextBox or ComboBox
+                or FrameworkElement { Tag: "TaskTimerDot" or "DismissReminderBubble" }) return true;
         return false;
     }
     public static void SetTransparency(double value, double? floating = null)
@@ -239,10 +261,16 @@ internal partial class SurfaceWindow : Window
     { backdrop ??= new LiveBackdrop(new WindowInteropHelper(this).Handle); ApplyGlassTint(); UpdateGlassGeometry(); }
     protected Brush GlassTintBrush => Ui.Brush($"#{(int)Math.Round(255 * (1 - GlassTransparency / 100)):X2}192333");
     protected virtual void ApplyGlassTint() => Root.Background = GlassTintBrush;
+    private (bool EdgeDocked, bool DockedLeft, double Height) lastBallClipState = (false, false, -1);
     internal void UpdateGlassGeometry()
     {
         var bounds = new Rect(0,0,(this is BallSurface ? 370 : Width) + (this is BallSurface { IsEdgeDocked: true } ? GlassRadius : 0),Height);
-        if (Root.Clip is not RectangleGeometry old || old.Rect != bounds || old.RadiusX != GlassRadius)
+        if (this is BallSurface ball)
+        {
+            var clipState = (ball.IsEdgeDocked, ball.DockedLeft, Height);
+            if (lastBallClipState != clipState) { lastBallClipState = clipState; Root.Clip = ball.CanvasClip; imageDirty = true; }
+        }
+        else if (Root.Clip is not RectangleGeometry old || old.Rect != bounds || old.RadiusX != GlassRadius)
         { Root.Clip = new RectangleGeometry(bounds,GlassRadius,GlassRadius); imageDirty = true; }
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd != IntPtr.Zero) backdrop?.Update(GlassRegions(), Native.GetDpiForWindow(hwnd) / 96.0,
@@ -304,7 +332,8 @@ internal partial class SurfaceWindow : Window
 
     public void Reveal(bool visible, bool animate)
     {
-        if (this is ColumnSurface && animate) { RevealLiveList(visible); return; }
+        if (!visible) BeforeHide?.Invoke();
+        if (this is ColumnSurface && animate) { if (SidewaysListReveal) RevealLiveScroll(visible); else RevealLiveList(visible); return; }
         if (ScrollEnabled && animate) { RevealScroll(visible); return; }
         var generation = ++motion;
         CancelHandoff();
@@ -344,8 +373,7 @@ internal partial class SurfaceWindow : Window
         // a list reveal never swaps a texture for a differently rasterized UI.
         await Dispatcher.InvokeAsync(() => Root.UpdateLayout(), DispatcherPriority.Render);
         if (generation != motion) return;
-        // Cold controls and the restored workspace must reach a real rendered
-        // frame before the 100ms timeline starts, just as for floating windows.
+        // Real controls reach composition before the shared 100ms timeline.
         var prepared = new TaskCompletionSource<bool>(); var rendered = 0;
         var preparationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(80) };
         preparationDeadline.Tick += (_, _) => prepared.TrySetResult(true);
@@ -355,32 +383,35 @@ internal partial class SurfaceWindow : Window
         preparationDeadline.Start(); var ready = await prepared.Task; preparationDeadline.Stop();
         if (!ready || generation != motion) return;
         CompositionTarget.Rendering -= liveListFrame; liveListFrame = null; cancelLivePreparation = null;
-        if (participant is not null) await participant.Ready();
-        if (generation != motion) return;
-        MotionDisplayStartTicks = Stopwatch.GetTimestamp(); LiveListRevealCount++;
-        var clock = Stopwatch.StartNew(); var target = visible ? Height : 0;
-        void Finish()
+        if (participant is not null) participant.Start(BeginMotion); else BeginMotion();
+        void BeginMotion()
         {
-            if (generation != motion || !animating) return;
-            CancelHandoff(); animationDeadline?.Stop(); animating = false; liveListHeight = target;
-            if (!visible) HideImmediately(); else Native.ClipWindow(this, Height);
-            IsHitTestVisible = true;
+            if (generation != motion) return;
+            MotionDisplayStartTicks = Stopwatch.GetTimestamp(); LiveListRevealCount++;
+            var clock = Stopwatch.StartNew(); var target = visible ? Height : 0;
+            void Finish()
+            {
+                if (generation != motion || !animating) return;
+                CancelHandoff(); animationDeadline?.Stop(); animating = false; liveListHeight = target;
+                if (!visible) HideImmediately(); else Native.ClipWindow(this, Height);
+                IsHitTestVisible = true;
+            }
+            liveListFrame = (_, _) =>
+            {
+                if (generation != motion || !animating) return;
+                var fraction = Math.Clamp(clock.Elapsed.TotalMilliseconds / 100, 0, 1);
+                liveListHeight = from + (target - from) * fraction;
+                Native.ClipLiveList(this, liveListHeight);
+                if (fraction >= 1) Finish();
+            };
+            CompositionTarget.Rendering += liveListFrame;
+            animationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(110) };
+            animationDeadline.Tick += (_, _) => Finish(); animationDeadline.Start();
+            UsesIndependentAnimation = false;
         }
-        liveListFrame = (_, _) =>
-        {
-            if (generation != motion || !animating) return;
-            var fraction = Math.Clamp(clock.Elapsed.TotalMilliseconds / 100, 0, 1);
-            liveListHeight = from + (target - from) * fraction;
-            Native.ClipLiveList(this, liveListHeight);
-            if (fraction >= 1) Finish();
-        };
-        CompositionTarget.Rendering += liveListFrame;
-        animationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(110) };
-        animationDeadline.Tick += (_, _) => Finish(); animationDeadline.Start();
-        UsesIndependentAnimation = false;
     }
     private void RevealScroll(bool visible) => RevealLiveScroll(visible);
-    protected void RevealToLeft(bool expanded, Action prepare, Action complete) => RevealLiveBall(expanded, prepare, complete);
+    protected void RevealBall(bool expanded, bool extendLeft, Action prepare, Action complete) => RevealLiveBall(expanded, extendLeft, prepare, complete);
     internal void WarmAnimation()
     {
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
@@ -473,6 +504,12 @@ internal static class Native
         SetWindowLongPtr(handle, -20, new IntPtr((style | 0x80) & ~0x40000));
         SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x37);
     }
+    internal static void ShowInTaskSwitcher(IntPtr handle)
+    {
+        var style = GetWindowLongPtr(handle, -20).ToInt64();
+        SetWindowLongPtr(handle, -20, new IntPtr((style | 0x40000 | 0x20) & ~0x80L & ~0x08000000L));
+        SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x37);
+    }
     [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern bool PostMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] internal static extern IntPtr GetFocus();
@@ -483,7 +520,8 @@ internal static class Native
         try
         {
             var handles = Application.Current.Windows.OfType<SurfaceWindow>().Where(x => x.IsVisible && x != ball)
-                .OrderBy(x => x.WindowLayer).ThenBy(x => x.ActivationOrder).Select(x => new WindowInteropHelper(x).Handle)
+                .OrderBy(x => x.WindowLayer).ThenBy(x => x is ColumnSurface column && column.SidewaysListReveal ? 1 : 0)
+                .ThenBy(x => x.ActivationOrder).Select(x => new WindowInteropHelper(x).Handle)
                 .Concat(Dialogs()).Concat(ball?.IsVisible == true ? new[] { new WindowInteropHelper(ball).Handle } : Array.Empty<IntPtr>())
                 .Distinct().ToArray();
             var owned = handles.ToHashSet(); var current = new List<IntPtr>();
@@ -552,7 +590,8 @@ internal static class Native
         var scale = GetDpiForWindow(handle) / 96.0;
         var width = Math.Max(1, (int)Math.Ceiling(window.Width * scale));
         var visible = Math.Clamp((int)Math.Round(width * progress), 1, width);
-        var left = (width - visible) / 2;
+        var left = window is SurfaceWindow surface && surface.HorizontalRevealAnchor != 0
+            ? (surface.HorizontalRevealAnchor < 0 ? 0 : width - visible) : (width - visible) / 2;
         var region = CreateRectRgn(left, 0, left + visible, (int)Math.Ceiling(window.Height * scale));
         if (SetWindowRgn(handle, region, false) == 0) DeleteObject(region);
     }
@@ -569,7 +608,8 @@ internal static class Native
             var visible = ball.EdgeVisibleClip;
             var edgeRegion = CreateRectRgn((int)Math.Round(visible.Left * dpi), 0,
                 (int)Math.Ceiling(visible.Right * dpi), (int)Math.Ceiling(window.Height * dpi));
-            var shape = CreateRoundRectRgn(0, 0, (int)Math.Ceiling((window.Width + (ball.IsEdgeDocked ? window.Height / 2 : 0)) * dpi),
+            var shape = CreateRoundRectRgn((int)Math.Round((ball.DockedLeft ? -window.Height / 2 : 0) * dpi), 0,
+                (int)Math.Ceiling((window.Width + (ball.IsEdgeDocked && !ball.DockedLeft ? window.Height / 2 : 0)) * dpi),
                 (int)Math.Ceiling(window.Height * dpi), (int)Math.Round(window.Height * dpi), (int)Math.Round(window.Height * dpi));
             const int RegionAnd = 1;
             CombineRgn(edgeRegion, edgeRegion, shape, RegionAnd); DeleteObject(shape);
@@ -585,7 +625,15 @@ internal static class Native
     internal static void ClipHorizontal(Window window, double visibleWidth)
     {
         var hwnd = new WindowInteropHelper(window).Handle; var scale = GetDpiForWindow(hwnd) / 96.0;
-        var region = CreateRoundRectRgn((int)Math.Round((window.Width - visibleWidth) * scale), 0, (int)Math.Ceiling((window.Width + (window is BallSurface { IsEdgeDocked: true } ? window.Height / 2 : 0)) * scale), (int)Math.Ceiling(window.Height * scale), (int)(window.Height * scale), (int)(window.Height * scale));
+        var left = window is BallSurface { DockedLeft: true } ? -window.Height / 2 : window.Width - visibleWidth;
+        var right = window.Width + (window is BallSurface { IsEdgeDocked: true, DockedLeft: false } ? window.Height / 2 : 0);
+        var region = CreateRoundRectRgn((int)Math.Round(left * scale), 0, (int)Math.Ceiling(right * scale),
+            (int)Math.Ceiling(window.Height * scale), (int)(window.Height * scale), (int)(window.Height * scale));
+        if (window is BallSurface)
+        {
+            var client = CreateRectRgn(0, 0, (int)Math.Ceiling(window.Width * scale), (int)Math.Ceiling(window.Height * scale));
+            CombineRgn(region, region, client, 1); DeleteObject(client);
+        }
         if (SetWindowRgn(hwnd, region, false) == 0) DeleteObject(region);
     }
     public static void TryGlass(SurfaceWindow window)

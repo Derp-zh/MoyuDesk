@@ -1,0 +1,17 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexBehaviorSource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexCatalog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexConversationDropTarget.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexConversationMenu.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexFileActivity.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexInitialization.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexInstallationDiscovery.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexLocalCatalog.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexObserver.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexObserver.Sidebar.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexSidebarSource.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexSnapshots.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../CodexThreadFamilies.cs" />
+  </ItemGroup>
+</Project>

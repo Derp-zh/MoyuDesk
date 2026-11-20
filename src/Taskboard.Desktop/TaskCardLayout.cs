@@ -9,18 +9,25 @@ namespace Taskboard.Desktop;
 // Shared geometry keeps the quick entry and its saved card in the same footprint.
 internal static class TaskCardLayout
 {
-    internal static double DetailsInkTop(TextBlock details)
+    private static readonly System.Collections.Generic.Dictionary<(string Font, FontStyle Style, FontWeight Weight, FontStretch Stretch, double Size, double Dpi, string Line), double> inkTopCache = new();
+    internal static double DetailsInkTop(StageDetailsText details)
     {
         var end = details.Text.IndexOfAny(['\r', '\n']);
         var line = details.Text[..Math.Min(128, end < 0 ? details.Text.Length : end)];
         if (string.IsNullOrWhiteSpace(line)) line = "Ag";
+        var dpi = VisualTreeHelper.GetDpi(details).PixelsPerDip;
+        var key = (details.FontFamily.Source, details.FontStyle, details.FontWeight, details.FontStretch, details.FontSize, dpi, line);
+        if (inkTopCache.TryGetValue(key, out var cached)) return cached;
         var formatted = new FormattedText(line, CultureInfo.CurrentUICulture, details.FlowDirection,
             new Typeface(details.FontFamily, details.FontStyle, details.FontWeight, details.FontStretch), details.FontSize,
-            details.Foreground, VisualTreeHelper.GetDpi(details).PixelsPerDip);
+            details.Foreground, dpi);
         var ink = formatted.BuildGeometry(new Point()).Bounds;
-        return ink.IsEmpty ? 0 : Math.Max(0, ink.Top);
+        var top = ink.IsEmpty ? 0 : Math.Max(0, ink.Top);
+        if (inkTopCache.Count >= 512) inkTopCache.Clear();
+        inkTopCache[key] = top;
+        return top;
     }
-    internal static void MatchTitleGap(FrameworkElement heading, Border pill, TextBlock details)
+    internal static void MatchTitleGap(FrameworkElement heading, Border pill, StageDetailsText details)
     {
         // Match the visible gap under the pill, including the font's leading.
         // The line still has zero layout height; only this requested spacing changes.

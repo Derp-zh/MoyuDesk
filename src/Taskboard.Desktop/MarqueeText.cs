@@ -14,7 +14,7 @@ internal sealed class MarqueeText : Decorator
     private double textWidth;
     internal double Overflow => Math.Max(0, textWidth - ActualWidth);
     internal int RestartCount { get; private set; }
-    internal const double InitialPauseSeconds = .5, EndPauseSeconds = .3;
+    internal const double InitialPauseSeconds = 1, EndPauseSeconds = .5;
     internal const double PixelsPerSecond = 24;
     private readonly bool conversation;
     internal MarqueeText(TextBlock label, bool conversation = false)

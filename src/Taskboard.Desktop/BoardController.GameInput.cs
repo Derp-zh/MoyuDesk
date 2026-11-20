@@ -38,7 +38,15 @@ internal sealed partial class BoardController
             var size = 64u; var header = (uint)(8 + IntPtr.Size * 2);
             if (GetRawInputData(lParam, 0x10000003, rawBuffer, ref size, header) == uint.MaxValue || size < header + 8 || Marshal.ReadInt32(rawBuffer) != 0) return IntPtr.Zero;
             var buttons = (ushort)Marshal.ReadInt16(rawBuffer, (int)header + 4);
-            if ((buttons & 0x15) == 0 || !GetCursorPos(out var point)) return IntPtr.Zero;
+            if ((buttons & 0x15) == 0) return IntPtr.Zero;
+            if (!GetCursorPos(out var point))
+            {
+                var fg = Native.GetForegroundWindow();
+                if (!IsFullscreen(fg)) return IntPtr.Zero;
+                GetWindowThreadProcessId(fg, out var fgPid);
+                if (fgPid == Environment.ProcessId) return IntPtr.Zero;
+                point = default;
+            }
             if ((buttons & 1) != 0) CapturePress(point, unchecked((uint)GetMessageTime()), 0, 2);
             if ((buttons & 4) != 0) CapturePress(point, unchecked((uint)GetMessageTime()), 1, 2);
             if ((buttons & 16) != 0) CapturePress(point, unchecked((uint)GetMessageTime()), 2, 2);
@@ -51,7 +59,7 @@ internal sealed partial class BoardController
             var cursor = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
             var visible = !GetCursorInfo(ref cursor) || (cursor.Flags & 1) != 0;
             var now = Environment.TickCount64;
-            var pressedAt = now - unchecked((uint)now - time);
+            var pressedAt = now - unchecked((int)((uint)now - time));
             presses.Writer.TryWrite(new Press(point, pressedAt, Interlocked.Read(ref controller.workspaceGeneration), button, source, Native.GetForegroundWindow(), visible));
         }
         private static bool CapturedByExternalWindow(Press press)
@@ -61,7 +69,19 @@ internal sealed partial class BoardController
             if (process == Environment.ProcessId) return false;
             var gui = new GuiThreadInfo { Size = Marshal.SizeOf<GuiThreadInfo>() };
             if (GetGUIThreadInfo(thread, ref gui) && gui.Capture != IntPtr.Zero) return true;
-            return !press.CursorVisible && IsFullscreen(press.Foreground);
+            if (!IsFullscreen(press.Foreground)) return false;
+            return !press.CursorVisible || IsCursorConfinedToSubrect(press.Foreground);
+        }
+        private static bool IsCursorConfinedToSubrect(IntPtr handle)
+        {
+            if (!GetClipCursor(out var clip)) return false;
+            var monitor = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(MonitorFromWindow(handle, 2), ref monitor)) return false;
+            var monWidth = monitor.Bounds.Right - monitor.Bounds.Left;
+            var monHeight = monitor.Bounds.Bottom - monitor.Bounds.Top;
+            var clipWidth = clip.Right - clip.Left;
+            var clipHeight = clip.Bottom - clip.Top;
+            return clipWidth > 0 && clipHeight > 0 && (clipWidth < monWidth - 2 || clipHeight < monHeight - 2);
         }
         private static bool IsFullscreen(IntPtr handle)
         {
@@ -80,6 +100,7 @@ internal sealed partial class BoardController
         [DllImport("user32.dll")] private static extern uint GetRawInputData(IntPtr raw, uint command, IntPtr data, ref uint size, uint headerSize);
         [DllImport("user32.dll")] private static extern int GetMessageTime();
         [DllImport("user32.dll")] private static extern bool GetCursorPos(out PixelPoint point);
+        [DllImport("user32.dll")] private static extern bool GetClipCursor(out PixelRect rect);
         [DllImport("user32.dll")] private static extern bool GetCursorInfo(ref CursorInfo info);
         [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr handle, out PixelRect bounds);
