@@ -68,7 +68,21 @@ internal sealed partial class SettingsSurface
         selectedAiPlatform = platform; if (aiSubpage is null) return;
         aiSubpage.Children.Clear(); aiSubpage.Tag = "AiPlatformSubpage-" + platform;
         aiSetupTitle = null; otherAiPage = null;
-        foreach (var entry in aiSubpages) { entry.Value.Background = entry.Key == platform ? Ui.Accent : Ui.Card; entry.Value.Foreground = entry.Key == platform ? Ui.Surface : Ui.Text; }
+        foreach (var entry in aiSubpages)
+        {
+            if (entry.Key == platform)
+            {
+                if (Application.Current?.TryFindResource("AccentButton") is Style accentStyle) entry.Value.Style = accentStyle;
+                else { entry.Value.Background = Ui.Accent; entry.Value.Foreground = Ui.AccentText; }
+            }
+            else
+            {
+                if (Application.Current?.TryFindResource(typeof(Button)) is Style defaultStyle) entry.Value.Style = defaultStyle;
+                entry.Value.ClearValue(Control.BackgroundProperty);
+                entry.Value.ClearValue(Control.BorderBrushProperty);
+                entry.Value.ClearValue(Control.ForegroundProperty);
+            }
+        }
         aiSubpage.Children.Add(platform == AiPlatform.Codex ? CodexSettings() : OtherAiSettings(platform));
         AttachHelp(aiSubpage);
     }

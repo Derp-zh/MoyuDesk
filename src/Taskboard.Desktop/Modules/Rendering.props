@@ -22,8 +22,10 @@
     <Compile Include="$(MSBuildThisFileDirectory)../SurfaceWindow.LiveScroll.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../TaskCardLayout.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../TaskCardMotion.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ThemePalette.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Ui.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Ui.Hints.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../ActionPinIcon.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../AdaptiveCardPanel.cs" />
   </ItemGroup>
 </Project>

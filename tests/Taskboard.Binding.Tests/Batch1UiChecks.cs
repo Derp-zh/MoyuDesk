@@ -122,25 +122,22 @@ internal static class Batch1UiChecks
             Assert(stageSearch is null || stageSearch.ToolTip is null, "#07 会话搜索框无遮挡Tooltip");
             Assert(Descendants<Button>(editor).Where(x => Equals(x.Tag, "StageRun") || Equals(x.Tag, "StageRemove")).All(x => x.ToolTip is not null), "#07 有信息价值的操作按钮Tooltip保留");
 
-            // #21: Stage name right rounded padding click -> caret after "阶段0" (index 3), NOT index 2 ("阶段|0")
+            // #21: Stage name capsule stretches as a single native TextBox filling column 0
             var stageNameBox = stageNames[0];
             stageNameBox.Text = "阶段0";
             Layout(editor, 430, EditorSurface.DefaultHeight);
+            Assert(stageNameBox.HorizontalAlignment == HorizontalAlignment.Stretch && stageNameBox.ActualWidth >= 100 && stageNameBox.ActualWidth <= 155,
+                $"#21 阶段名称圆角胶囊整体即为完整拉满的单一TextBox(width={stageNameBox.ActualWidth:F1})");
+            var presenter = ColumnSurface.FindChild<ScrollContentPresenter>(stageNameBox)!;
+            var insideRightOfText = new Point(Math.Min(stageNameBox.ActualWidth - 16, 80), stageNameBox.ActualHeight / 2);
+            Assert(new Rect(presenter.RenderSize).Contains(stageNameBox.TranslatePoint(insideRightOfText, presenter)),
+                "#21 胶囊内文本右侧空白区直接处于原生ScrollContentPresenter命中范围内");
             var rightClickPoint = new Point(stageNameBox.ActualWidth - 4, stageNameBox.ActualHeight / 2);
             var rightCaret = RoundedInput.ResolveCaretIndex(stageNameBox, rightClickPoint);
-            Assert(rightCaret == 3, $"#21 点击阶段名称右侧圆角区光标准确落在\"阶段0\"末尾(实际={rightCaret})");
+            Assert(rightCaret == 3, $"#21 点击阶段名称最右侧圆角边光标准确落在\"阶段0\"末尾(实际={rightCaret})");
             var leftClickPoint = new Point(4, stageNameBox.ActualHeight / 2);
             var leftCaret = RoundedInput.ResolveCaretIndex(stageNameBox, leftClickPoint);
-            Assert(leftCaret == 0, $"#21 点击阶段名称左侧圆角区光标准确落在\"阶段0\"开头(实际={leftCaret})");
-            // Simulate actual PreviewMouseLeftButtonDown on right rounded area
-            var mouseDown = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
-            {
-                RoutedEvent = Mouse.PreviewMouseDownEvent,
-                Source = stageNameBox
-            };
-            // Verify via helper & focus behavior
-            var presenter = ColumnSurface.FindChild<ScrollContentPresenter>(stageNameBox)!;
-            Assert(!new Rect(presenter.RenderSize).Contains(stageNameBox.TranslatePoint(rightClickPoint, presenter)), "#21 右侧圆角点确实位于ScrollContentPresenter之外的留白区域");
+            Assert(leftCaret == 0, $"#21 点击阶段名称左侧圆角边光标准确落在\"阶段0\"开头(实际={leftCaret})");
 
             // #11: Clicking collapsed stage details suppresses initial drag selection
             inactiveEditor.Input.Text = "第一行内容比较长用于测试点击展开不误选\n第二行内容\n第三行内容\n第四行内容";
@@ -165,14 +162,14 @@ internal static class Batch1UiChecks
             closeMethod.Invoke(inactiveEditor, [textMenu, new RoutedEventArgs()]);
             Layout(editor, 430, EditorSurface.DefaultHeight);
 
-            // #27: No fake blank space at bottom of StageDetailsEditor (test both running stage & expanded inactive stage), and editor ScrollViewer is non-focusable
+            // #27: No fake blank space at bottom of StageDetailsEditor, while outer editor ScrollViewer remains focusable so clicking outside inputs leaves focus
             runningEditor.Input.Text = "第1行\n第2行\n第3行\n第4行无尾部空行";
             Layout(editor, 430, EditorSurface.DefaultHeight);
             var lastRect = runningEditor.Input.GetRectFromCharacterIndex(runningEditor.Input.Text.Length);
             var diff = runningEditor.ActualHeight - (lastRect.Bottom + runningEditor.Input.Padding.Bottom);
             Assert(!lastRect.IsEmpty && diff <= 4.0 && diff >= -1.0, $"#27 多行阶段详情底部无虚假留空(差值={diff:F2}px)");
             var editorScroll = Descendants<ScrollViewer>(editor).First(x => x.TemplatedParent is null);
-            Assert(!editorScroll.Focusable, "#27 编辑器外层ScrollViewer不可抢夺键盘焦点，点击底部区域不收起输入框");
+            Assert(editorScroll.Focusable, "#27 编辑器外层ScrollViewer保持可聚焦，点击输入框外空白可正常退出焦点");
 
             // #08: Up on first line -> 0, Down on last line -> Text.Length; middle line untouched; IME untouched
             var multi = inactiveEditor.Input;
@@ -210,10 +207,15 @@ internal static class Batch1UiChecks
             stageNameBox.RaiseEvent(singleUp);
             Assert(singleUp.Handled && stageNameBox.CaretIndex == 0, "#08 单行输入框按向上键跳至最开头");
 
-            // #28: StageReorderGesture glyph uses unified Fill (no self-overlap) & uniform brightness
+            // #28: StageReorderGesture glyph uses unified Fill (1.5 width, softened color), Arrow cursor, and IsMouseOver accent trigger
             var reorderThumb = Descendants<Thumb>(editor).First(x => Equals(x.Tag, "StageReorder"));
             var thumbPath = Descendants<System.Windows.Shapes.Path>(reorderThumb).Single();
             Assert(thumbPath.Fill is not null && thumbPath.Stroke is null, "#28 排序图标使用无自相交合并轮廓单次填充(Fill!=null, Stroke==null)");
+            Assert(reorderThumb.Cursor == Cursors.Arrow, "#28 鼠标悬停排序按钮不改变鼠标指针样式(保持Arrow)");
+            var hasHoverAccentTrigger = reorderThumb.Template.Triggers.OfType<Trigger>().Any(t =>
+                t.Property == UIElement.IsMouseOverProperty && Equals(t.Value, true) &&
+                t.Setters.OfType<Setter>().Any(s => s.Property == Border.BorderBrushProperty));
+            Assert(hasHoverAccentTrigger, "#28 排序按钮Thumb模板包含IsMouseOver青绿色边框高亮触发器");
             var dv = new DrawingVisual();
             using (var dc = dv.RenderOpen())
                 dc.DrawRectangle(new VisualBrush(reorderThumb), null, new Rect(0, 0, 24, 24));
@@ -235,7 +237,8 @@ internal static class Batch1UiChecks
             var topPeak = MaxBrightnessInRows(5, 7);
             var midPeak = MaxBrightnessInRows(10, 13);
             var botPeak = MaxBrightnessInRows(16, 18);
-            Assert(topPeak > 180 && midPeak > 180 && botPeak > 180 && Math.Abs(topPeak - midPeak) <= 10 && Math.Abs(botPeak - midPeak) <= 10, $"#28 排序图标上中下段像素亮度均匀无发白一截(top={topPeak}, mid={midPeak}, bot={botPeak})");
+            Assert(topPeak >= 140 && midPeak >= 140 && botPeak >= 140 && topPeak < 235 && Math.Abs(topPeak - midPeak) <= 12 && Math.Abs(botPeak - midPeak) <= 12,
+                $"#28 排序图标1.5线宽柔化后上中下段像素亮度均匀且与相邻按钮协调(top={topPeak}, mid={midPeak}, bot={botPeak})");
 
             // #10: ColumnSurface header ellipsis + StageDetailsText ellipsis
             var column = new ColumnSurface(controller, Lane.Running);

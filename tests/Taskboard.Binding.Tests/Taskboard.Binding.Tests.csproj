@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ApplicationManifest>../../src/Taskboard.Desktop/app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="System.IO" />

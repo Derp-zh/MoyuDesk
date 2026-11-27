@@ -4,6 +4,20 @@ namespace Taskboard.Core;
 
 public static partial class Validation
 {
+    public static void Normalize(Preferences? preferences)
+    {
+        if (preferences is null) return;
+        preferences.ThemeMode = ThemePresets.NormalizeMode(preferences.ThemeMode);
+        preferences.DarkThemePreset = ThemePresets.NormalizeDark(preferences.DarkThemePreset);
+        preferences.LightThemePreset = ThemePresets.NormalizeLight(preferences.LightThemePreset);
+    }
+
+    public static void Normalize(BoardState? state)
+    {
+        if (state is null) return;
+        Normalize(state.Preferences);
+    }
+
     public static void Check(BoardState state)
     {
         Require(state is not null && state.Version is 1 or 2, "不支持的数据版本");
@@ -44,6 +58,7 @@ public static partial class Validation
             else Require(!ids.Contains(s.Working.Id) && !archiveIds.Contains(s.Working.Id), "草稿与正式任务重复");
         }
         var p = state.Preferences!;
+        Require(p.ExpandedStageDetails is { Count: <= 10000 } && p.ExpandedStageDetails.All(x => x is { Length: > 0 and <= 128 }), "阶段详情展开记录无效");
         Require(Enum.IsDefined(p.NewStageDefaultState), "新建阶段默认状态无效");
         Require(p.AutoArchiveAfterDays is >= 1 and <= 36500, "自动归档天数应为1至36500的整数");
         Require(p.Hotkey is not null && p.Hotkey.IsValid, "面板快捷键无效");
@@ -64,6 +79,10 @@ public static partial class Validation
         Require(double.IsFinite(p.GlassTransparency) && p.GlassTransparency >= 0 && p.GlassTransparency <= 100, "毛玻璃透明度应为0至100%");
         Require(double.IsFinite(p.BallTransparency) && p.BallTransparency >= 0 && p.BallTransparency <= 100, "悬浮球透明度应为0至100%");
         Require(double.IsFinite(p.FloatingTransparency) && p.FloatingTransparency >= 0 && p.FloatingTransparency <= 100, "悬浮窗口透明度应为0至100%");
+        Require(double.IsFinite(p.PinnedActionTransparency) && p.PinnedActionTransparency >= 0 && p.PinnedActionTransparency <= 100, "待操作常驻穿透透明度应为0至100%");
+        Require(Enum.IsDefined(p.ThemeMode), "主题模式无效");
+        Require(ThemePresets.IsValidDark(p.DarkThemePreset), "深色配色方案无效");
+        Require(ThemePresets.IsValidLight(p.LightThemePreset), "浅色配色方案无效");
         Require(p.Positions is not null && p.ConnectionConfigs is not null && p.MachineMarkers is not null, "设置缺少字段");
         foreach (var (key, pos) in p.Positions!)
             Require(!string.IsNullOrWhiteSpace(key) && pos is not null && double.IsFinite(pos.X) && double.IsFinite(pos.Y) && double.IsFinite(pos.Width) && double.IsFinite(pos.Height) && pos.Width >= 1 && pos.Height >= 1, "窗口位置尺寸无效");

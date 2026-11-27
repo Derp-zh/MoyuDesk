@@ -150,13 +150,14 @@ internal static class CodexStopRules
         check(!restored.CurrentCodex!.AwaitingUserAction && restored.CurrentCodex.PendingRequests.Count == 0 && restored.CurrentCodex.PendingApprovals.Count == 0 && !restored.CurrentCodex.PendingRequestOverflow,
             "归档恢复重新绑定基线、不继承旧失败和请求保护");
 
-        // Use the real reminder path, rather than assigning the target lane, to
-        // distinguish ongoing execution from execution that actually resumes.
+        // Use the real reminder path to verify in-place dot notification, then
+        // verify Codex ongoing execution vs real resumption from Action.
         task = Item(); var now = DateTime.Now;
         task.Reminder = new Reminder { Enabled = true, Repeat = Repeat.Once, NextLocal = now.AddSeconds(-1) };
         var timed = new BoardState { Tasks = [task] };
-        check(ReminderClock.Tick(timed, now).SequenceEqual([task.Id]) && task.Lane == Lane.Action && task.TimerUnread && task.CurrentCodex!.Phase == CodexPhase.Running,
-            "真实提醒时钟把正在执行任务移待操作并设红点");
+        check(ReminderClock.Tick(timed, now).SequenceEqual([task.Id]) && task.Lane == Lane.Running && task.TimerUnread && task.CurrentCodex!.Phase == CodexPhase.Running,
+            "#04 真实提醒时钟保持正在执行任务原位不变并设红点");
+        task.Lane = Lane.Action;
         check(Apply(task, Active(), 1) && task.Lane == Lane.Running && task.TimerUnread,
             "提醒后的同轮active保留阶段聚合，但不虚构恢复清红点");
         Apply(task, Active(), 2);
@@ -172,6 +173,7 @@ internal static class CodexStopRules
         check(task.Lane == Lane.Running && task.TimerUnread, "提醒与运行状态保存重读后重复poll仍保留红点");
         task.Reminder.Enabled = true; task.Reminder.NextLocal = now.AddSeconds(-2);
         ReminderClock.Tick(new BoardState { Tasks = [task] }, now);
+        task.Lane = Lane.Action;
         Apply(task, Started("turn-after-reminder"), 3, "epoch-reminder-reconnected");
         check(task.Lane == Lane.Running && !task.TimerUnread, "提醒后准确新轮次实际执行才回进行中并清红点");
 

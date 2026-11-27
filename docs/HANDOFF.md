@@ -18,12 +18,15 @@
 
 ## 2. 当前版本与运行包现状
 
-- **当前源码版本**：`0.9.53`
+- **当前源码版本**：`0.9.56`
 - **保留的本地运行包**（位于 `release/`）：
   - `release/instant-taskboard-0.9.51-guided-reminders-r4-win-x64`：**用户当前开机自启正在使用的正式包**，请勿删除或覆盖。
   - `release/Taskboard-0.9.52-claude-regression-r1`：0.9.52 本地构建包。
-  - `release/MoyuDesk-0.9.53-portable-win-x64`：最新本地构建包，入口为 `MoyuDesk.exe`。
-- **最新 GitHub 公开版**：[摸鱼台 0.9.53](https://github.com/Derp-zh/MoyuDesk/releases/tag/v0.9.53)。本地修改默认不上传 GitHub，除非用户明确要求发布。
+  - `release/MoyuDesk-0.9.53-portable-win-x64`：0.9.53 本地构建包。
+  - `release/MoyuDesk-0.9.54-portable-win-x64`：0.9.54 本地构建包。
+  - `release/MoyuDesk-0.9.55-portable-win-x64`：0.9.55 本地构建包。
+  - `release/MoyuDesk-0.9.56-github-win-x64`：最新本地构建包，入口为 `MoyuDesk.exe`（附带固定目录安装/升级/回滚脚本 `安装或升级摸鱼台.cmd` 与 `scripts/`）。
+- **最新 GitHub 公开版**：[摸鱼台 0.9.56](https://github.com/Derp-zh/MoyuDesk/releases/tag/v0.9.56)。本地修改默认不上传 GitHub，除非用户明确要求发布。
 
 ## 3. 核心安全约束（必读）
 

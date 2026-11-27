@@ -22,8 +22,16 @@ public static class QuickScroll
     public static Thickness GetThumbMargin(DependencyObject value) => (Thickness)value.GetValue(ThumbMarginProperty);
     public static void SetThumbMargin(DependencyObject value, Thickness margin) => value.SetValue(ThumbMarginProperty, margin);
     internal const double DurationMs = 90;
+    internal const double DefaultWheelStepDip = 80;
+    internal static double ComputeWheelStep(double viewportHeight, int wheelScrollLines)
+    {
+        if (wheelScrollLines == 0) return 0;
+        if (wheelScrollLines < 0) return viewportHeight > 0 ? viewportHeight : DefaultWheelStepDip;
+        return viewportHeight > 0 ? Math.Min(DefaultWheelStepDip, viewportHeight * 0.25) : DefaultWheelStepDip;
+    }
     private static readonly ConditionalWeakTable<ScrollViewer, Motion> motions = new();
     internal static bool IsAnimating(ScrollViewer viewer) => motions.TryGetValue(viewer, out var motion) && motion.Active;
+    internal static double CurrentTarget(ScrollViewer viewer) => motions.TryGetValue(viewer, out var motion) && motion.Active ? motion.Target : viewer.VerticalOffset;
     private static void Enable(DependencyObject value, DependencyPropertyChangedEventArgs args)
     {
         if (value is not ScrollViewer viewer) return;
@@ -65,26 +73,24 @@ public static class QuickScroll
             if (!ReferenceEquals(candidate, viewer)) return;
             break;
         }
-        if (!CanMove(viewer, args.Delta)) return;
+        if (ScrollByWheelDelta(viewer, args.Delta)) args.Handled = true;
+    }
+    internal static bool ScrollByWheelDelta(ScrollViewer viewer, int wheelDelta, bool requireVisible = true)
+    {
+        if (wheelDelta == 0 || !CanMove(viewer, wheelDelta, requireVisible)) return false;
         var motion = motions.GetValue(viewer, x => new Motion(x));
         var lines = SystemParameters.WheelScrollLines;
-        if (lines == 0) return;
+        var delta = ComputeWheelStep(viewer.ViewportHeight, lines);
+        if (delta <= 0) return false;
         var from = motion.Active ? motion.Target : viewer.VerticalOffset;
-        var delta = lines < 0 ? viewer.ViewportHeight : Math.Max(16, viewer.FontSize * 1.2) * lines;
-        if (lines > 0 && viewer.TemplatedParent is ItemsControl items && items.Items.Count > 0)
-        {
-            // Preserve the existing item-based wheel distance while rendering
-            // fractional pixel positions; virtualization stays enabled.
-            var realized = ItemsPanel(viewer)?.Children.OfType<FrameworkElement>().Where(x => x is { IsVisible: true, ActualHeight: > 0 }).ToArray() ?? [];
-            if (realized.Length > 0) delta = realized.Average(x => x.ActualHeight + x.Margin.Top + x.Margin.Bottom) * lines;
-        }
-        motion.Start(Math.Clamp(from - args.Delta / 120.0 * delta, 0, viewer.ScrollableHeight));
-        args.Handled = true;
+        motion.Start(Math.Clamp(from - wheelDelta / 120.0 * delta, 0, viewer.ScrollableHeight));
+        return true;
     }
-    private static bool CanMove(ScrollViewer viewer, int delta)
+    private static bool CanMove(ScrollViewer viewer, int delta, bool requireVisible = true)
     {
         var offset = motions.TryGetValue(viewer, out var motion) && motion.Active ? motion.Target : viewer.VerticalOffset;
-        return viewer.IsVisible && viewer.ScrollableHeight > 0 && (delta < 0 ? offset < viewer.ScrollableHeight - .1 : offset > .1);
+        var visible = requireVisible ? viewer.IsVisible : viewer.Visibility == Visibility.Visible;
+        return visible && viewer.ScrollableHeight > 0 && (delta < 0 ? offset < viewer.ScrollableHeight - .1 : offset > .1);
     }
     private static VirtualizingStackPanel? ItemsPanel(DependencyObject node)
     {
@@ -114,6 +120,11 @@ public static class QuickScroll
         {
             Stop(); from = viewer.VerticalOffset; Target = target;
             if (Math.Abs(Target - from) < .1) return;
+            if (!viewer.IsLoaded)
+            {
+                viewer.ScrollToVerticalOffset(Math.Clamp(Target, 0, viewer.ScrollableHeight));
+                return;
+            }
             clock.Restart(); Active = true; CompositionTarget.Rendering += Frame;
         }
         internal void Stop()

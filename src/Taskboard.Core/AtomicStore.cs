@@ -86,6 +86,7 @@ public sealed class AtomicStore
     public static BoardState Read(string path)
     {
         var state = JsonSerializer.Deserialize<BoardState>(File.ReadAllBytes(path), Copies.Json) ?? throw new InvalidDataException("文件没有数据");
+        Validation.Normalize(state);
         Validation.Check(state);
         return state;
     }

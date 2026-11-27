@@ -25,12 +25,13 @@ foreach (var name in new[] { "Taskboard.dll", "Taskboard.Core.dll" })
     if (name == "Taskboard.dll" && reader.GetAssemblyDefinition().Version != expectedVersion) throw new Exception("Unexpected assembly version");
     rows.Add(new { name, types = types.Length, resources });
 }
-foreach (var required in new[] { "MoyuDesk.exe", "Taskboard.runtimeconfig.json", "coreclr.dll", "hostfxr.dll", "PresentationFramework.dll", "integrations/dsh-observer.mjs", "使用说明.md", "版本说明.md", "THIRD-PARTY-NOTICES.txt" })
+foreach (var required in new[] { "MoyuDesk.exe", "Taskboard.runtimeconfig.json", "coreclr.dll", "hostfxr.dll", "PresentationFramework.dll", "integrations/dsh-observer.mjs", "使用说明.md", "版本说明.md", "THIRD-PARTY-NOTICES.txt", "version.json", "安装或升级摸鱼台.cmd", "scripts/install.ps1", "scripts/rollback.ps1", "scripts/uninstall.ps1" })
     if (!File.Exists(Path.Combine(root,required))) throw new Exception("Incomplete portable package: " + required);
 var entry = System.Diagnostics.FileVersionInfo.GetVersionInfo(Path.Combine(root, "MoyuDesk.exe"));
 if (entry.ProductName != "摸鱼台 · MoyuDesk" || entry.FileDescription != entry.ProductName || entry.ProductVersion != sourceVersion)
     throw new Exception("Unexpected portable launcher name or version");
-var unexpected = Directory.EnumerateFiles(root,"*",SearchOption.AllDirectories).Where(f => new[] { ".cs", ".ps1", ".py", ".csproj", ".zst" }.Contains(Path.GetExtension(f))).ToArray();
+var allowedScripts = new HashSet<string>(new[] { "scripts/install.ps1", "scripts/rollback.ps1", "scripts/uninstall.ps1" }, StringComparer.OrdinalIgnoreCase);
+var unexpected = Directory.EnumerateFiles(root,"*",SearchOption.AllDirectories).Where(f => new[] { ".cs", ".ps1", ".py", ".csproj", ".zst" }.Contains(Path.GetExtension(f))).Where(f => !allowedScripts.Contains(Path.GetRelativePath(root, f).Replace('\\', '/'))).ToArray();
 if (unexpected.Length != 0) throw new Exception("Source or historical tooling leaked into package");
 var fileHashes = Directory.GetFiles(root,"*",SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal)
     .ToDictionary(f => Path.GetRelativePath(root,f).Replace('\\','/'), f => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f))));

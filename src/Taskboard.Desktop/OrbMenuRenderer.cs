@@ -8,8 +8,31 @@ namespace Taskboard.Desktop;
 
 internal sealed class OrbMenuRenderer : ToolStripProfessionalRenderer
 {
+    internal OrbMenuRenderer() : base(new ThemeColorTable())
+    {
+        RoundedEdges = false;
+    }
+
+    internal static void ApplyTheme(ToolStrip menu)
+    {
+        var p = ThemePalette.Current;
+        menu.BackColor = p.MenuBackDrawingColor;
+        menu.ForeColor = p.MenuTextDrawingColor;
+        foreach (ToolStripItem item in menu.Items)
+        {
+            item.BackColor = p.MenuBackDrawingColor;
+            item.ForeColor = item.Enabled ? p.MenuTextDrawingColor : p.MenuDisabledDrawingColor;
+            if (item is ToolStripDropDownItem { HasDropDownItems: true } drop)
+            {
+                ApplyTheme(drop.DropDown);
+            }
+        }
+        menu.Invalidate();
+    }
+
     internal static void Fit(ContextMenuStrip menu)
     {
+        ApplyTheme(menu);
         var scale = Math.Max(menu.DeviceDpi, Native.GetDpiForWindow(menu.Handle)) / 96.0;
         var width = menu.Items.OfType<ToolStripMenuItem>().Where(x => x.Available).Select(item =>
         {
@@ -48,10 +71,52 @@ internal sealed class OrbMenuRenderer : ToolStripProfessionalRenderer
         }
         finally { menu.ResumeLayout(true); }
     }
+
+    protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+    {
+        using var bg = new SolidBrush(ThemePalette.Current.MenuBackDrawingColor);
+        e.Graphics.FillRectangle(bg, e.AffectedBounds);
+    }
+
+    protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+    {
+        var bounds = new Rectangle(0, 0, e.AffectedBounds.Width - 1, e.AffectedBounds.Height - 1);
+        using var pen = new Pen(ThemePalette.Current.MenuBorderDrawingColor);
+        e.Graphics.DrawRectangle(pen, bounds);
+    }
+
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+    {
+        var rect = new Rectangle(3, 1, Math.Max(1, e.Item.Width - 6), Math.Max(1, e.Item.Height - 2));
+        var color = e.Item.Selected && e.Item.Enabled
+            ? ThemePalette.Current.MenuHighlightDrawingColor
+            : ThemePalette.Current.MenuBackDrawingColor;
+        using var brush = new SolidBrush(color);
+        e.Graphics.FillRectangle(brush, rect);
+    }
+
+    protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+    {
+        var y = e.Item.Height / 2;
+        using var pen = new Pen(ThemePalette.Current.MenuBorderDrawingColor);
+        e.Graphics.DrawLine(pen, 8, y, Math.Max(8, e.Item.Width - 8), y);
+    }
+
+    protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+    {
+        e.ArrowColor = e.Item?.Enabled == false
+            ? ThemePalette.Current.MenuDisabledDrawingColor
+            : ThemePalette.Current.MenuTextDrawingColor;
+        base.OnRenderArrow(e);
+    }
+
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
     { if (e.Item.Name != "BallEdgeAutoHide") base.OnRenderItemCheck(e); }
+
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
     {
+        var p = ThemePalette.Current;
+        e.TextColor = e.Item.Enabled ? p.MenuTextDrawingColor : p.MenuDisabledDrawingColor;
         if (e.Item is not ToolStripMenuItem { Name: "BallEdgeAutoHide" } item) { base.OnRenderItemText(e); return; }
         var scale = (e.ToolStrip?.DeviceDpi ?? 96) / 96f;
         var width = 26 * scale; var height = 14 * scale;
@@ -62,10 +127,26 @@ internal sealed class OrbMenuRenderer : ToolStripProfessionalRenderer
             e.TextFormat | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         var previous = e.Graphics.SmoothingMode; e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = new GraphicsPath(); path.AddArc(x, y, height, height, 90, 180); path.AddArc(x + width - height, y, height, height, 270, 180); path.CloseFigure();
-        using var track = new SolidBrush(item.Checked ? Color.FromArgb(71, 137, 131) : Color.FromArgb(143, 150, 157));
-        using var dot = new SolidBrush(Color.White); e.Graphics.FillPath(track, path);
+        using var track = new SolidBrush(item.Checked ? p.SwitchTrackOnDrawingColor : p.SwitchTrackOffDrawingColor);
+        using var dot = new SolidBrush(p.SwitchDotDrawingColor); e.Graphics.FillPath(track, path);
         var inset = 2 * scale; var diameter = height - 2 * inset;
         e.Graphics.FillEllipse(dot, item.Checked ? x + width - diameter - inset : x + inset, y + inset, diameter, diameter);
         e.Graphics.SmoothingMode = previous;
+    }
+
+    private sealed class ThemeColorTable : ProfessionalColorTable
+    {
+        internal ThemeColorTable() { UseSystemColors = false; }
+        public override Color ToolStripDropDownBackground => ThemePalette.Current.MenuBackDrawingColor;
+        public override Color MenuBorder => ThemePalette.Current.MenuBorderDrawingColor;
+        public override Color MenuItemBorder => ThemePalette.Current.MenuHighlightDrawingColor;
+        public override Color MenuItemSelected => ThemePalette.Current.MenuHighlightDrawingColor;
+        public override Color MenuItemSelectedGradientBegin => ThemePalette.Current.MenuHighlightDrawingColor;
+        public override Color MenuItemSelectedGradientEnd => ThemePalette.Current.MenuHighlightDrawingColor;
+        public override Color ImageMarginGradientBegin => ThemePalette.Current.MenuBackDrawingColor;
+        public override Color ImageMarginGradientMiddle => ThemePalette.Current.MenuBackDrawingColor;
+        public override Color ImageMarginGradientEnd => ThemePalette.Current.MenuBackDrawingColor;
+        public override Color SeparatorDark => ThemePalette.Current.MenuBorderDrawingColor;
+        public override Color SeparatorLight => ThemePalette.Current.MenuBackDrawingColor;
     }
 }

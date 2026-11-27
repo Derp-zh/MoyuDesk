@@ -19,8 +19,11 @@ internal sealed class StageReorderGesture
     private static readonly Geometry ReorderGlyph = CreateReorderGlyph();
     private static Geometry CreateReorderGlyph()
     {
-        var raw = Geometry.Parse("M3,5 L6,2 L9,5 M6,2 L6,14 M3,11 L6,14 L9,11");
-        var pen = new Pen(Brushes.White, 2.0)
+        // Center the 1.5px vertical shaft on a pixel center (x=6.5 in 13px width)
+        // so the shaft and arrowheads have identical full-pixel coverage with no
+        // subpixel dimming or overlap brightening.
+        var raw = Geometry.Parse("M3.5,5 L6.5,2 L9.5,5 M6.5,2 L6.5,14 M3.5,11 L6.5,14 L9.5,11");
+        var pen = new Pen(Brushes.White, 1.5)
         {
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round,
@@ -34,21 +37,44 @@ internal sealed class StageReorderGesture
     internal static Thumb Create(StackPanel stages, Border source, Func<bool> enabled, Action<int> commit)
     {
         var handle = new Thumb { Width = 24, Height = 24, Margin = new Thickness(0, 3, 4, 3),
-            Cursor = Cursors.SizeNS, ToolTip = "按住拖动调整阶段顺序", Tag = "StageReorder", Focusable = true };
+            Cursor = Cursors.Arrow, ToolTip = "按住拖动调整阶段顺序", Tag = "StageReorder", Focusable = true };
+        var useDynamic = Application.Current?.TryFindResource("ButtonBrush") is Brush;
         var circle = new FrameworkElementFactory(typeof(Border));
+        circle.Name = "border";
         circle.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
-        circle.SetValue(Border.BackgroundProperty, Ui.Card); circle.SetValue(Border.BorderBrushProperty, Ui.Line);
+        if (useDynamic)
+        {
+            circle.SetResourceReference(Border.BackgroundProperty, "ButtonBrush");
+            circle.SetResourceReference(Border.BorderBrushProperty, "ButtonBorderBrush");
+        }
+        else
+        {
+            circle.SetValue(Border.BackgroundProperty, Ui.ButtonSurface);
+            circle.SetValue(Border.BorderBrushProperty, Ui.ButtonBorder);
+        }
         circle.SetValue(Border.BorderThicknessProperty, new Thickness(1));
         circle.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
         circle.SetValue(FrameworkElement.UseLayoutRoundingProperty, true);
         var label = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
         label.SetValue(System.Windows.Shapes.Path.DataProperty, ReorderGlyph);
-        label.SetValue(System.Windows.Shapes.Path.FillProperty, Ui.Text);
+        if (useDynamic)
+            label.SetResourceReference(System.Windows.Shapes.Path.FillProperty, "ReorderGlyphBrush");
+        else
+            label.SetValue(System.Windows.Shapes.Path.FillProperty, ThemePalette.Current.ReorderGlyph);
         label.SetValue(System.Windows.Shapes.Path.StretchProperty, Stretch.None);
-        label.SetValue(FrameworkElement.WidthProperty, 12.0); label.SetValue(FrameworkElement.HeightProperty, 16.0);
+        label.SetValue(FrameworkElement.WidthProperty, 13.0); label.SetValue(FrameworkElement.HeightProperty, 16.0);
         label.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
         label.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-        circle.AppendChild(label); handle.Template = new ControlTemplate(typeof(Thumb)) { VisualTree = circle };
+        circle.AppendChild(label);
+        var template = new ControlTemplate(typeof(Thumb)) { VisualTree = circle };
+        var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        hover.Setters.Add(new Setter(Border.BorderBrushProperty, useDynamic ? new DynamicResourceExtension("AccentBrush") : (object)Ui.Accent, "border"));
+        hover.Setters.Add(new Setter(Border.BackgroundProperty, useDynamic ? new DynamicResourceExtension("ButtonHoverBrush") : (object)Ui.ButtonHover, "border"));
+        template.Triggers.Add(hover);
+        var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+        disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.45, "border"));
+        template.Triggers.Add(disabled);
+        handle.Template = template;
         System.Windows.Automation.AutomationProperties.SetName(handle, "拖动调整阶段顺序");
         var index = -1; var active = false; var originalOpacity = source.Opacity;
         Border[] originals = [];

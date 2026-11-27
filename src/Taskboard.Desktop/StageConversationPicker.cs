@@ -17,15 +17,12 @@ internal sealed class StageConversationPicker : IDisposable
     private readonly Stage stage;
     private readonly Action changed;
     private readonly bool snapshot;
-    private readonly ListBox results = new() { Background = Ui.Surface, Foreground = Ui.Text, BorderThickness = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    private readonly ListBox results = new() { BorderThickness = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch };
     private readonly TextBlock note = Ui.Label("", 11, Ui.Muted);
     private readonly TextBlock empty = Ui.Label("没有匹配的会话名称", 12, Ui.Muted);
     private readonly TextBlock heading = Ui.Label("", 12, Ui.Muted);
     private readonly Button close;
     private readonly Button unlink;
-    private readonly System.Windows.Media.Brush unlinkDefaultBackground;
-    private readonly System.Windows.Media.Brush unlinkDefaultBorder;
-    private readonly System.Windows.Media.Brush unlinkDefaultForeground;
     private bool unlinkHovered;
     private readonly Dictionary<AiPlatform, Button> platformButtons = new();
     private readonly Grid sidebar = new() { Margin = new Thickness(8, 0, 0, 0), Tag = "StageAiPlatformSidebar" };
@@ -52,11 +49,14 @@ internal sealed class StageConversationPicker : IDisposable
     internal TextBox Input { get; }
     internal Button Trigger { get; }
     internal FrameworkElement? StageScope { get; set; }
-    internal TextBlock Placeholder { get; } = new() { Foreground = Ui.Muted, Margin = new Thickness(10, 12, 9, 8), IsHitTestVisible = false, TextTrimming = TextTrimming.CharacterEllipsis };
+    internal TextBlock Placeholder { get; } = new() { Margin = new Thickness(10, 12, 9, 8), IsHitTestVisible = false, TextTrimming = TextTrimming.CharacterEllipsis };
     internal CodexThread[] Matches => HasPlatforms ? catalog.Where(x => x.Platform == SelectedPlatform && x.DisplayName.Contains(Input.Text.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray() : [];
     internal StageConversationPicker(BoardController controller, Stage stage, Action changed, bool snapshot, EditorSurface? editor = null)
     {
         this.controller = controller; this.stage = stage; this.changed = changed; this.snapshot = snapshot; Editor = editor;
+        Ui.BindBrush(results, Control.BackgroundProperty, "SurfaceBrush", Ui.Surface);
+        Ui.BindBrush(results, Control.ForegroundProperty, "TextBrush", Ui.Text);
+        Ui.BindBrush(Placeholder, TextBlock.ForegroundProperty, "MutedBrush", Ui.Muted);
         Pane.Tag = "StageBinding-" + stage.Id;
         Pane.ColumnDefinitions.Add(new ColumnDefinition());
         Pane.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
@@ -74,12 +74,15 @@ internal sealed class StageConversationPicker : IDisposable
         Input = Ui.Input(); Input.Tag = "StageConversationSearch";
         RoundedInput.SetEdgeArrowNavigation(Input, false);
         Input.Padding = new Thickness(9); Input.Margin = new Thickness(0, 0, 0, 6);
-        var header = new DockPanel(); close = Ui.Button("×", () => Collapse()); close.Width = 25; close.Height = 25; close.Padding = new Thickness(0);
+        var header = new DockPanel(); close = Ui.Button("×", () => Collapse()); close.Width = 26; close.Height = 26; close.Padding = new Thickness(0); Ui.ApplyCircularStyle(close);
         DockPanel.SetDock(close, Dock.Right); header.Children.Add(close);
         header.Children.Add(heading); Pane.Children.Add(header);
+        var useDynamic = Application.Current?.TryFindResource("LineBrush") is System.Windows.Media.Brush;
         var plate = new FrameworkElementFactory(typeof(Border));
         plate.SetBinding(Border.BackgroundProperty, new Binding(nameof(Button.Background)) { RelativeSource = RelativeSource.TemplatedParent });
-        plate.SetValue(Border.BorderBrushProperty, Ui.Line); plate.SetValue(Border.BorderThicknessProperty, new Thickness(0, 0, 0, 1));
+        if (useDynamic) plate.SetResourceReference(Border.BorderBrushProperty, "LineBrush");
+        else plate.SetValue(Border.BorderBrushProperty, Ui.Line);
+        plate.SetValue(Border.BorderThicknessProperty, new Thickness(0, 0, 0, 1));
         var caption = new FrameworkElementFactory(typeof(ContentPresenter));
         caption.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
         caption.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
@@ -98,7 +101,7 @@ internal sealed class StageConversationPicker : IDisposable
         }
         for (var divider = 0; divider < 2; divider++)
         {
-            var line = new System.Windows.Shapes.Rectangle { Height = 1, Fill = Ui.Brush("#8094A8C2"),
+            var line = new System.Windows.Shapes.Rectangle { Height = 1, Fill = ThemePalette.Current.PlatformDivider,
                 VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false, SnapsToDevicePixels = true };
             Grid.SetRow(line, divider); sidebar.Children.Add(line); platformDividers.Add(line);
         }
@@ -107,14 +110,16 @@ internal sealed class StageConversationPicker : IDisposable
         var field = new Grid(); field.Children.Add(Input); field.Children.Add(Placeholder); Grid.SetRow(field, 1); Pane.Children.Add(field);
         var row = new FrameworkElementFactory(typeof(StackPanel));
         var name = new FrameworkElementFactory(typeof(TextBlock)); name.SetBinding(TextBlock.TextProperty, new Binding(nameof(CodexThread.DisplayName))); name.SetValue(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis); row.AppendChild(name);
-        var number = new FrameworkElementFactory(typeof(TextBlock)); number.SetBinding(TextBlock.TextProperty, new Binding(nameof(CodexThread.Id))); number.SetValue(TextBlock.FontSizeProperty, 10.0); number.SetValue(TextBlock.ForegroundProperty, Ui.Muted); row.AppendChild(number);
+        var number = new FrameworkElementFactory(typeof(TextBlock)); number.SetBinding(TextBlock.TextProperty, new Binding(nameof(CodexThread.Id))); number.SetValue(TextBlock.FontSizeProperty, 10.0);
+        if (useDynamic) number.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+        else number.SetValue(TextBlock.ForegroundProperty, Ui.Muted);
+        row.AppendChild(number);
         results.ItemTemplate = new DataTemplate { VisualTree = row }; VirtualizingPanel.SetIsVirtualizing(results, true);
         ScrollViewer.SetHorizontalScrollBarVisibility(results, ScrollBarVisibility.Disabled);
         ScrollViewer.SetVerticalScrollBarVisibility(results, ScrollBarVisibility.Auto);
         var list = new Grid(); list.Children.Add(results); list.Children.Add(empty); Grid.SetRow(list, 2); Pane.Children.Add(list);
         unlink = Ui.Button("解除绑定", () => { if (!CanSelectFromWindow) return; stage.Codex = null; Present(); changed(); Collapse(); });
-        unlink.Tag = "StageConversationUnlink"; unlink.HorizontalAlignment = HorizontalAlignment.Left; unlink.Padding = new Thickness(12, 3, 12, 3);
-        unlinkDefaultBackground = unlink.Background; unlinkDefaultBorder = unlink.BorderBrush; unlinkDefaultForeground = unlink.Foreground;
+        unlink.Tag = "StageConversationUnlink"; unlink.HorizontalAlignment = HorizontalAlignment.Left; unlink.MinHeight = 32; unlink.Padding = new Thickness(12, 6, 12, 6); unlink.Margin = new Thickness(0, 6, 0, 2);
         Grid.SetRow(unlink, 3); Pane.Children.Add(unlink);
         Grid.SetRow(note, 4); Pane.Children.Add(note);
         Input.TextChanged += (_, _) => { Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; Filter(); };
@@ -164,15 +169,26 @@ internal sealed class StageConversationPicker : IDisposable
         unlinkHovered = active;
         if (active)
         {
-            unlink.Background = Ui.Brush("#595184B9");
+            unlink.Background = ThemePalette.Current.PlatformTabActive;
             unlink.BorderBrush = Ui.Accent;
             unlink.Foreground = Ui.Accent;
         }
         else
         {
-            unlink.Background = unlinkDefaultBackground;
-            unlink.BorderBrush = unlinkDefaultBorder;
-            unlink.Foreground = unlinkDefaultForeground;
+            unlink.ClearValue(Control.BackgroundProperty);
+            unlink.ClearValue(Control.BorderBrushProperty);
+            unlink.ClearValue(Control.ForegroundProperty);
+        }
+    }
+    internal void ApplyTheme()
+    {
+        foreach (var line in platformDividers) line.Fill = ThemePalette.Current.PlatformDivider;
+        PresentPlatforms();
+        if (unlinkHovered)
+        {
+            unlink.Background = ThemePalette.Current.PlatformTabActive;
+            unlink.BorderBrush = Ui.Accent;
+            unlink.Foreground = Ui.Accent;
         }
     }
     internal void PrepareWindow(bool drag, Action dismiss)
@@ -185,10 +201,11 @@ internal sealed class StageConversationPicker : IDisposable
     private void PresentPlatforms()
     {
         Placeholder.Text = HasPlatforms ? "搜索 " + AiState.Name(SelectedPlatform) + " 会话" : "请先初始化 AI 平台";
+        var p = ThemePalette.Current;
         foreach (var (value, button) in platformButtons)
         {
-            button.Background = Ui.Brush(value == SelectedPlatform ? "#595184B9" : "#202C3D53");
-            button.Foreground = value == SelectedPlatform ? Ui.Accent : Ui.Text;
+            button.Background = value == SelectedPlatform ? p.PlatformTabActive : p.PlatformTabIdle;
+            button.Foreground = value == SelectedPlatform ? p.Accent : p.Text;
             button.FontWeight = value == SelectedPlatform ? FontWeights.SemiBold : FontWeights.Normal;
         }
     }

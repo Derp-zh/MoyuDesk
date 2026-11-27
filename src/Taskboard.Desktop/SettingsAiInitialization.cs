@@ -28,7 +28,7 @@ internal sealed partial class SettingsSurface
         var failed = report.State is CodexSetupState.NotFound or CodexSetupState.InvalidPath or CodexSetupState.MissingCli or CodexSetupState.Incompatible or
             CodexSetupState.ConnectionUnavailable or CodexSetupState.CatalogUnavailable or CodexSetupState.Failed;
         aiSetupTitle.Text = checking ? "正在检查连接…" : failed ? report.Message : desktopConnected ? "本机连接已建立" : report.State == CodexSetupState.NotStarted ? "尚未检查连接" : report.SourceReady ? "连接暂时中断" : report.Message;
-        aiSetupTitle.Foreground = checking || report.State == CodexSetupState.NotStarted ? Ui.Text : failed ? Ui.Brush("#F2C879") : desktopConnected ? Ui.Accent : Ui.Brush("#F2C879");
+        aiSetupTitle.Foreground = checking || report.State == CodexSetupState.NotStarted ? Ui.Text : failed ? Ui.Warn : desktopConnected ? Ui.Accent : Ui.Warn;
         aiSetupNext!.Text = failed ? report.Next : desktopConnected
             ? ids.Length == 0 ? "下一步：在任务阶段关联一个已有 Codex 聊天。" : "聊天状态无法确认时，会保留原有等待提醒。"
             : report.State == CodexSetupState.NotStarted ? "正常打开 Codex 后，点击检查连接。" : report.Next;

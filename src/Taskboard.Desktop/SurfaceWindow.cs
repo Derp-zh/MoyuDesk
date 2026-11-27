@@ -72,8 +72,20 @@ internal partial class SurfaceWindow : Window
         if (ScrollEnabled && (!IsVisible || scrollRunning)) { RevealScroll(true); return; }
         ShowImmediately();
     }
-    private void ShowImmediately() {if(!animating) {Root.Opacity=1;contentHost.Visibility=Visibility.Visible;backdrop?.SetVisible(true);} base.Show();if(!animating)Native.ShowWindow(ContentHandle,4);if(activateWhenShown){activateWhenShown=false;base.Activate();}Native.RaiseBall();}
-    public new bool Activate() { if (SuppressActivation) { ActivationOrder = ++activationSequence; return false; } if (!IsVisible) { activateWhenShown = true; ActivationOrder = ++activationSequence; return false; } return base.Activate(); }
+    internal bool IsClickThrough { get; private set; }
+    internal void SetClickThrough(bool enabled)
+    {
+        IsClickThrough = enabled;
+        ApplyClickThroughStyle();
+    }
+    internal void ApplyClickThroughStyle()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero) Native.SetClickThrough(handle, IsClickThrough);
+        if (ContentHandle != IntPtr.Zero) Native.SetClickThrough(ContentHandle, IsClickThrough);
+    }
+    private void ShowImmediately() {if(!animating) {Root.Opacity=1;contentHost.Visibility=Visibility.Visible;backdrop?.SetVisible(true);} base.Show();if(!animating)Native.ShowWindow(ContentHandle,4);ApplyClickThroughStyle();if(activateWhenShown && !IsClickThrough){activateWhenShown=false;base.Activate();}Native.RaiseBall();}
+    public new bool Activate() { if (IsClickThrough) return false; if (SuppressActivation) { ActivationOrder = ++activationSequence; return false; } if (!IsVisible) { activateWhenShown = true; ActivationOrder = ++activationSequence; return false; } return base.Activate(); }
     internal static event Action<SurfaceWindow>? AnyWindowActivated;
     internal static event Action<SurfaceWindow>? AnyActiveWindowHiding;
     private void NotifyActiveHidingIfNeeded()
@@ -164,6 +176,7 @@ internal partial class SurfaceWindow : Window
     public event Action? PositionChanged;
     public SurfaceWindow(double width, double height, bool layered = false)
     {
+        Native.EnsureTsfControlKeyBridgeInstalled();
         Width = width; Height = height; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
         AllowsTransparency = false; Background = Brushes.Transparent; ShowInTaskbar = false; Topmost = true; ShowActivated = false;
         FontFamily = new FontFamily("Microsoft YaHei UI"); Foreground = Ui.Text;
@@ -175,29 +188,63 @@ internal partial class SurfaceWindow : Window
         Root.Clip = new RectangleGeometry(new Rect(0, 0, width, height), 16, 16);
         var presentation = new Grid();
         presentation.Children.Add(Root); presentation.Children.Add(scrollGlow);
-        contentHost = new GlassContentHost(presentation, (SurfaceContentRoot)Root); Content = contentHost;
+        contentHost = new GlassContentHost(presentation, (SurfaceContentRoot)Root)
+        {
+            ShouldActivateOnClick = () => !SuppressActivation && IsVisible,
+            EnsureHostActivated = () => { if (!SuppressActivation && IsVisible) base.Activate(); }
+        };
+        Content = contentHost;
         SourceInitialized += (_, _) =>
         {
             Native.HideFromTaskSwitcher(new WindowInteropHelper(this).Handle);
             if (GlassEnabled) Native.TryGlass(this);
             HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(CompositionChanged);
             Native.ClipWindow(this, Height);
+            ApplyClickThroughStyle();
         };
         Activated += (_, _) => { ActivationOrder = ++activationSequence; Native.RaiseBall(); AnyWindowActivated?.Invoke(this); };
         IsVisibleChanged += (_, _) => { if (IsVisible) Native.RaiseBall(); };
         SizeChanged += (_, _) => { UpdateGlassGeometry(); if (!animating) Native.ClipWindow(this, ActualHeight); };
         DpiChanged += (_, _) => { UpdateGlassGeometry(); if (!animating) Native.ClipWindow(this, Height); };
+        Root.AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) => OnRootGotKeyboardFocus(e.NewFocus)));
         Root.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent,new TextChangedEventHandler((_,_) => InvalidateAnimation()));
         Root.AddHandler(ScrollViewer.ScrollChangedEvent,new ScrollChangedEventHandler((_,_) => InvalidateAnimation()));
         Closed += (_, _) => { CancelHandoff(); animationDeadline?.Stop(); backdrop?.Dispose(); backdrop = null; contentHost.Dispose(); };
         Closing += (_, e) => { if (!allowClose) { e.Cancel = true; Hide(); } };
+    }
+    private bool syncingInputFocus;
+    internal int InputFocusSyncCount { get; private set; }
+    private void OnRootGotKeyboardFocus(IInputElement? focused)
+    {
+        if (focused is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox)
+            SynchronizeInputFocus(focused);
+    }
+    internal void SynchronizeInputFocus(IInputElement? target = null)
+    {
+        if (syncingInputFocus) return;
+        syncingInputFocus = true;
+        try
+        {
+            InputFocusSyncCount++;
+            if (SuppressActivation || !IsVisible) return;
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            if (Native.GetForegroundWindow() != hwnd) base.Activate();
+            contentHost.EnsureNativeFocus();
+            if (target is DependencyObject dep && !ReferenceEquals(Keyboard.FocusedElement, dep))
+                Keyboard.Focus(target);
+        }
+        finally
+        {
+            syncingInputFocus = false;
+        }
     }
     private IntPtr CompositionChanged(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         // Reanchor the native child before WPF handles the parent's size change
         // and performs layout. Waiting until after layout exposed shifted text
         // for several milliseconds on every leftward reveal frame.
-        if (message == 0x0047 && this is BallSurface) contentHost.SynchronizeCanvas();
+        if (message == 0x0047 && this is BallSurface) { contentHost.SynchronizeCanvas(); UpdateGlassGeometry(); }
         if (message == 0x0046 && updatingBallBounds && lParam != IntPtr.Zero)
         {
             var position = Marshal.PtrToStructure<WindowPos>(lParam);
@@ -207,6 +254,16 @@ internal partial class SurfaceWindow : Window
         if (message == 0x031E && GlassEnabled) Native.TryGlass(this);
         if (message == 0x0018 && wParam == IntPtr.Zero) NativeHideCount++;
         if (message == 0x0014) { handled = true; return new IntPtr(1); }
+        // Forward Win32 keyboard focus from the outer glass shell to the child WPF
+        // input root AND set handled=true so the outer HwndKeyboardInputProvider.OnSetFocus
+        // cannot run afterward, deactivate the child keyboard provider, clear WPF focus,
+        // or reset the thread TSF ITfDocumentMgr to EmptyDim.
+        if (message == 0x0007 && IsVisible && ContentHandle != IntPtr.Zero && !contentHost.AnimationHidden)
+        {
+            if (!SuppressActivation) contentHost.EnsureNativeFocus();
+            handled = true;
+            return IntPtr.Zero;
+        }
         // These windows draw their entire frame themselves. Let activation
         // change keyboard focus, but prevent Windows from repainting a native
         // non-client frame over the transparent composition target on click.
@@ -217,12 +274,18 @@ internal partial class SurfaceWindow : Window
             var x = (short)(packed & 0xffff)/scale; var y = (short)((packed >> 16)&0xffff)/scale;
             if (ball.ContainsOrbPoint(new Point(x, y))) { ball.ClickDuringAnimation(); handled=true; }
         }
+        if (message == 0x0084 && IsClickThrough) { handled = true; return new IntPtr(-1); }
         if (message == 0x0084 && this is BallSurface entry)
         {
             var packed = lParam.ToInt64(); var p = new Point((short)(packed & 0xffff),(short)((packed >> 16)&0xffff));
             var bounds = Native.ScreenBounds(this); var radius = bounds.Height/2;
-            var x = Math.Clamp(p.X,bounds.Left+radius,bounds.Right-radius); var y = bounds.Top+radius;
-            var flat = entry.IsEdgeDocked && (entry.DockedLeft ? p.X <= bounds.Left + radius : p.X >= bounds.Right - radius);
+            var scale = bounds.Height / Math.Max(1, entry.Height);
+            var visibleWidth = Math.Clamp(entry.CurrentCapsuleWidth * scale, bounds.Height, Math.Max(bounds.Height, bounds.Width));
+            var capLeft = entry.ExpandsLeft ? bounds.Right - visibleWidth : bounds.Left;
+            var capRight = entry.ExpandsLeft ? bounds.Right : bounds.Left + visibleWidth;
+            if (p.X < capLeft || p.X > capRight || p.Y < bounds.Top || p.Y > bounds.Bottom) { handled = true; return new IntPtr(-1); }
+            var x = Math.Clamp(p.X, capLeft + radius, capRight - radius); var y = bounds.Top + radius;
+            var flat = entry.IsEdgeDocked && (entry.DockedLeft ? p.X <= capLeft + radius : p.X >= capRight - radius);
             if (!flat && (p.X-x)*(p.X-x)+(p.Y-y)*(p.Y-y)>radius*radius) { handled = true; return new IntPtr(-1); }
         }
         return IntPtr.Zero;
@@ -247,7 +310,7 @@ internal partial class SurfaceWindow : Window
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
             if (current is System.Windows.Controls.Primitives.ButtonBase or TextBox or ComboBox
-                or FrameworkElement { Tag: "TaskTimerDot" or "DismissReminderBubble" }) return true;
+                or FrameworkElement { Tag: "TaskTimerDot" or "DismissReminderBubble" or "StageDetailsToggleBubble" }) return true;
         return false;
     }
     public static void SetTransparency(double value, double? floating = null)
@@ -256,25 +319,50 @@ internal partial class SurfaceWindow : Window
         if (floating is double floatingValue) FloatingTransparency = Math.Clamp(floatingValue, 0, 100);
         foreach (var window in Application.Current.Windows.OfType<SurfaceWindow>().ToArray()) window.RefreshGlass();
     }
-    public virtual void RefreshGlass() { imageDirty = true; if (GlassEnabled && new WindowInteropHelper(this).Handle != IntPtr.Zero) Native.TryGlass(this); }
+    internal bool SkipsDesktopBlur => GlassTransparency <= 0.001;
+    internal bool BackdropUsesDesktopBlur => backdrop?.UsesHostBackdropBrush ?? false;
+    internal int BackdropRebuildCount => backdrop?.RebuildCount ?? 0;
+    internal int BackdropInPlaceUpdateCount => backdrop?.InPlaceUpdateCount ?? 0;
+    internal Windows.UI.Color BackdropSurfaceColor => backdrop?.LastSurfaceColor ?? ThemePalette.Current.SurfaceCompositionColor;
+    internal Brush CurrentGlassTintBrush => GlassTintBrush;
+    public virtual void ApplyTheme()
+    {
+        Foreground = Ui.Text;
+        Root.SetValue(System.Windows.Documents.TextElement.ForegroundProperty, Foreground);
+        if (!GlassEnabled || backdrop is null) ApplyGlassTint();
+        RefreshGlass();
+    }
+    public virtual void RefreshGlass()
+    {
+        imageDirty = true;
+        if (!GlassEnabled || new WindowInteropHelper(this).Handle == IntPtr.Zero) return;
+        Native.UpdateWindowTheme(this);
+        if (backdrop is not null) { ApplyGlassTint(); UpdateGlassGeometry(); BackdropMode = SkipsDesktopBlur ? "纯色不透明（跳过桌面模糊）" : "实时系统毛玻璃"; }
+        else Native.TryGlass(this);
+    }
     internal void EnsureLiveBackdrop()
     { backdrop ??= new LiveBackdrop(new WindowInteropHelper(this).Handle); ApplyGlassTint(); UpdateGlassGeometry(); }
-    protected Brush GlassTintBrush => Ui.Brush($"#{(int)Math.Round(255 * (1 - GlassTransparency / 100)):X2}192333");
+    protected Brush GlassTintBrush => ThemePalette.Current.SurfaceWithAlpha((byte)Math.Round(255 * (1 - GlassTransparency / 100)));
     protected virtual void ApplyGlassTint() => Root.Background = GlassTintBrush;
-    private (bool EdgeDocked, bool DockedLeft, double Height) lastBallClipState = (false, false, -1);
+    private (bool EdgeDocked, bool DockedLeft, bool ExpandsLeft, double CapsuleWidth, double Height) lastBallClipState = (false, false, true, -1, -1);
     internal void UpdateGlassGeometry()
     {
         var bounds = new Rect(0,0,(this is BallSurface ? 370 : Width) + (this is BallSurface { IsEdgeDocked: true } ? GlassRadius : 0),Height);
         if (this is BallSurface ball)
         {
-            var clipState = (ball.IsEdgeDocked, ball.DockedLeft, Height);
+            var clipState = (ball.IsEdgeDocked, ball.DockedLeft, ball.ExpandsLeft, ball.CurrentCapsuleWidth, Height);
             if (lastBallClipState != clipState) { lastBallClipState = clipState; Root.Clip = ball.CanvasClip; imageDirty = true; }
         }
         else if (Root.Clip is not RectangleGeometry old || old.Rect != bounds || old.RadiusX != GlassRadius)
         { Root.Clip = new RectangleGeometry(bounds,GlassRadius,GlassRadius); imageDirty = true; }
         var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd != IntPtr.Zero) backdrop?.Update(GlassRegions(), Native.GetDpiForWindow(hwnd) / 96.0,
-            this is ColumnSurface ? GlassTransparency : null);
+        if (hwnd != IntPtr.Zero)
+        {
+            backdrop?.Update(GlassRegions(), Native.GetDpiForWindow(hwnd) / 96.0,
+                this is ColumnSurface ? GlassTransparency : null, opaqueBackdrop: SkipsDesktopBlur,
+                surfaceColor: ThemePalette.Current.SurfaceCompositionColor);
+            if (backdrop is not null) BackdropMode = SkipsDesktopBlur ? "纯色不透明（跳过桌面模糊）" : "实时系统毛玻璃";
+        }
     }
     internal void InvalidateAnimation() => imageDirty = true;
     internal async void SwapContent(Action change, double paneWidth, double selectedSlot)
@@ -368,7 +456,7 @@ internal partial class SurfaceWindow : Window
         liveListHeight = from; Native.ClipLiveList(this, from);
         if (!IsVisible && visible) ShowImmediately();
         if (!IsVisible) { animating = false; return; }
-        Native.ShowWindow(ContentHandle, 4); IsHitTestVisible = visible;
+        Native.ShowWindow(ContentHandle, 4); ApplyClickThroughStyle(); IsHitTestVisible = visible;
         // Keep real controls and the same glass/tint visible throughout. Ending
         // a list reveal never swaps a texture for a differently rasterized UI.
         await Dispatcher.InvokeAsync(() => Root.UpdateLayout(), DispatcherPriority.Render);
@@ -412,6 +500,13 @@ internal partial class SurfaceWindow : Window
     }
     private void RevealScroll(bool visible) => RevealLiveScroll(visible);
     protected void RevealBall(bool expanded, bool extendLeft, Action prepare, Action complete) => RevealLiveBall(expanded, extendLeft, prepare, complete);
+    protected void CancelBallReveal()
+    {
+        motion++;
+        CancelLiveBallFrame();
+        animationDeadline?.Stop();
+        animating = false;
+    }
     internal void WarmAnimation()
     {
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
@@ -489,7 +584,24 @@ internal static class Native
     internal static void BeginWorkspaceChange() { ordering = true; WorkspaceRevealBatch.Current = new WorkspaceRevealBatch(); }
     internal static void EndWorkspaceChange() { var batch = WorkspaceRevealBatch.Current; WorkspaceRevealBatch.Current = null; batch?.Seal(); ordering=false;RaiseBall(); }
     private static Window? ball;
+    private static Window? pinnedOverlay;
     private static bool ordering;
+    internal static void SetPinnedOverlay(Window? overlay) { pinnedOverlay = overlay; RaiseBall(); }
+    internal static bool SetClickThrough(IntPtr handle, bool enabled)
+    {
+        if (handle == IntPtr.Zero || !IsWindow(handle)) return false;
+        const long WsExTransparent = 0x20L;
+        var style = GetWindowLongPtr(handle, -20).ToInt64();
+        var next = enabled ? (style | WsExTransparent) : (style & ~WsExTransparent);
+        if (next != style)
+        {
+            SetWindowLongPtr(handle, -20, new IntPtr(next));
+            SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x37);
+        }
+        return true;
+    }
+    internal static bool IsClickThrough(IntPtr handle) =>
+        handle != IntPtr.Zero && IsWindow(handle) && (GetWindowLongPtr(handle, -20).ToInt64() & 0x20L) != 0;
     [StructLayout(LayoutKind.Sequential)] private struct Margins { public int Left, Right, Top, Bottom; }
     [DllImport("dwmapi.dll")] private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -504,15 +616,129 @@ internal static class Native
         SetWindowLongPtr(handle, -20, new IntPtr((style | 0x80) & ~0x40000));
         SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x37);
     }
-    internal static void ShowInTaskSwitcher(IntPtr handle)
+    [DllImport("imm32.dll")] private static extern bool ImmAssociateContextEx(IntPtr hwnd, IntPtr himc, uint flags);
+    [DllImport("imm32.dll")] internal static extern IntPtr ImmGetContext(IntPtr hwnd);
+    [DllImport("imm32.dll")] internal static extern bool ImmReleaseContext(IntPtr hwnd, IntPtr himc);
+    [DllImport("user32.dll")] private static extern IntPtr GetKeyboardLayout(uint idThread);
+    internal static bool EnsureDefaultImeContext(IntPtr handle) =>
+        handle != IntPtr.Zero && IsWindow(handle) && ImmAssociateContextEx(handle, IntPtr.Zero, 0x0010);
+    // Match WPF InputMethod.IsImm32Ime: legacy IMM32 HKLs live in 0xE0xxxxxx,
+    // while modern Windows 11 TSF TIPs (e.g. WeType / Microsoft Pinyin on 0x08040804)
+    // report ImmIsIME(hkl) == true even though they are pure TSF services.
+    internal static bool IsImm32ImeActive() => (unchecked((uint)GetKeyboardLayout(0).ToInt64()) & 0xF0000000u) == 0xE0000000u;
+
+    [ComImport, Guid("aa80e801-2021-11d2-93e0-0060b067b86e"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface ITfThreadMgr
     {
-        var style = GetWindowLongPtr(handle, -20).ToInt64();
-        SetWindowLongPtr(handle, -20, new IntPtr((style | 0x40000 | 0x20) & ~0x80L & ~0x08000000L));
-        SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x37);
+        [PreserveSig] int Activate(out uint clientId);
+        [PreserveSig] int Deactivate();
+        [PreserveSig] int CreateDocumentMgr(out IntPtr dim);
+        [PreserveSig] int EnumDocumentMgrs(out IntPtr enumDims);
+        [PreserveSig] int GetFocus(out IntPtr dim);
+        [PreserveSig] int SetFocus(IntPtr dim);
+        [PreserveSig] int AssociateFocus(IntPtr hwnd, IntPtr newDim, out IntPtr prevDim);
+        [PreserveSig] int IsThreadFocus([MarshalAs(UnmanagedType.Bool)] out bool isFocus);
+    }
+    [ComImport, Guid("aa80e7f0-2021-11d2-93e0-0060b067b86e"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface ITfKeystrokeMgr
+    {
+        [PreserveSig] int AdviseKeyEventSink(uint clientId, IntPtr punk, [MarshalAs(UnmanagedType.Bool)] bool foreground);
+        [PreserveSig] int UnadviseKeyEventSink(uint clientId);
+        [PreserveSig] int GetForeground(out Guid clsid);
+        [PreserveSig] int TestKeyDown(UIntPtr wParam, IntPtr lParam, [MarshalAs(UnmanagedType.Bool)] out bool eaten);
+        [PreserveSig] int TestKeyUp(UIntPtr wParam, IntPtr lParam, [MarshalAs(UnmanagedType.Bool)] out bool eaten);
+        [PreserveSig] int KeyDown(UIntPtr wParam, IntPtr lParam, [MarshalAs(UnmanagedType.Bool)] out bool eaten);
+        [PreserveSig] int KeyUp(UIntPtr wParam, IntPtr lParam, [MarshalAs(UnmanagedType.Bool)] out bool eaten);
+    }
+    [DllImport("msctf.dll")] private static extern int TF_GetThreadMgr(out ITfThreadMgr threadMgr);
+
+    [ThreadStatic] private static bool tsfControlKeyBridgeInstalled;
+    internal static int TsfControlKeyForwardCount { get; private set; }
+    internal static bool IsTsfControlKeyBridgeInstalled => tsfControlKeyBridgeInstalled;
+
+    internal static IntPtr GetTsfFocusedDocumentMgrIdentity()
+    {
+        try
+        {
+            if (TF_GetThreadMgr(out var threadMgr) != 0 || threadMgr is null) return IntPtr.Zero;
+            if (threadMgr.GetFocus(out var rawDim) != 0 || rawDim == IntPtr.Zero) return IntPtr.Zero;
+            try
+            {
+                var obj = Marshal.GetObjectForIUnknown(rawDim);
+                var unk = Marshal.GetIUnknownForObject(obj);
+                Marshal.Release(unk);
+                return unk;
+            }
+            finally { Marshal.Release(rawDim); }
+        }
+        catch { return IntPtr.Zero; }
+    }
+
+    internal static void EnsureTsfControlKeyBridgeInstalled()
+    {
+        if (tsfControlKeyBridgeInstalled) return;
+        tsfControlKeyBridgeInstalled = true;
+        ComponentDispatcher.ThreadFilterMessage += OnTsfControlKeyFilterMessage;
+    }
+
+    private static void OnTsfControlKeyFilterMessage(ref MSG msg, ref bool handled)
+    {
+        if (handled) return;
+        if (TryForwardTsfControlKey(ref msg, out _)) handled = true;
+    }
+
+    // .NET WPF's TextServicesManager.TextServicesKeystroke maps LeftShift/RightShift
+    // back to VK_SHIFT (0x10) + scan code 42/54, but omits LeftCtrl/RightCtrl, sending
+    // wParam = VK_LCONTROL (0xA2) / VK_RCONTROL (0xA3) with scanCode = 0 to TSF.
+    // Pure TSF Chinese IMEs such as WeType expect standard Win32 WM_KEYDOWN/WM_KEYUP
+    // wParam = VK_CONTROL (0x11) with the real scan code / extended flag in lParam.
+    // Forward VK_CONTROL directly to ITfKeystrokeMgr before WPF replaces wParam with
+    // 0xA2/0xA3, while leaving Ctrl+C/V/A/Z (via Win32 GetKeyState) and IME-disabled
+    // inputs (e.g. SettingsHotkey) completely untouched.
+    internal static bool TryForwardTsfControlKey(ref MSG msg, out bool eaten)
+    {
+        eaten = false;
+        const int WmKeyDown = 0x0100;
+        const int WmKeyUp = 0x0101;
+        const long VkControl = 0x11;
+        if (msg.message is not (WmKeyDown or WmKeyUp) || msg.wParam.ToInt64() != VkControl) return false;
+        if (Keyboard.FocusedElement is not DependencyObject focused) return false;
+        if (focused is not (System.Windows.Controls.Primitives.TextBoxBase or PasswordBox)) return false;
+        if (!InputMethod.GetIsInputMethodEnabled(focused)) return false;
+        if (focused is not Visual visual || PresentationSource.FromVisual(visual) is not HwndSource source || source.Handle != msg.hwnd) return false;
+        if (IsImm32ImeActive()) return false;
+        try
+        {
+            if (TF_GetThreadMgr(out var threadMgr) != 0 || threadMgr is null) return false;
+            if (threadMgr.GetFocus(out var dim) != 0 || dim == IntPtr.Zero) return false;
+            Marshal.Release(dim);
+            if (threadMgr is not ITfKeystrokeMgr keystrokeMgr) return false;
+            var wParam = new UIntPtr((ulong)VkControl);
+            if (msg.message == WmKeyDown)
+            {
+                if (keystrokeMgr.TestKeyDown(wParam, msg.lParam, out var testEaten) == 0 && testEaten)
+                {
+                    keystrokeMgr.KeyDown(wParam, msg.lParam, out eaten);
+                    eaten = true;
+                }
+            }
+            else
+            {
+                if (keystrokeMgr.TestKeyUp(wParam, msg.lParam, out var testEaten) == 0 && testEaten)
+                {
+                    keystrokeMgr.KeyUp(wParam, msg.lParam, out eaten);
+                    eaten = true;
+                }
+            }
+            TsfControlKeyForwardCount++;
+            return true;
+        }
+        catch { return false; }
     }
     [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern bool PostMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] internal static extern IntPtr GetFocus();
+    [DllImport("user32.dll")] internal static extern IntPtr SetFocus(IntPtr hwnd);
     public static void SetBall(Window window) { ball = window; RaiseBall(); }
     public static void RaiseBall()
     {
@@ -522,7 +748,9 @@ internal static class Native
             var handles = Application.Current.Windows.OfType<SurfaceWindow>().Where(x => x.IsVisible && x != ball)
                 .OrderBy(x => x.WindowLayer).ThenBy(x => x is ColumnSurface column && column.SidewaysListReveal ? 1 : 0)
                 .ThenBy(x => x.ActivationOrder).Select(x => new WindowInteropHelper(x).Handle)
+                .Concat(pinnedOverlay?.IsVisible == true ? new[] { new WindowInteropHelper(pinnedOverlay).Handle } : Array.Empty<IntPtr>())
                 .Concat(Dialogs()).Concat(ball?.IsVisible == true ? new[] { new WindowInteropHelper(ball).Handle } : Array.Empty<IntPtr>())
+                .Where(h => h != IntPtr.Zero)
                 .Distinct().ToArray();
             var owned = handles.ToHashSet(); var current = new List<IntPtr>();
             EnumWindows((handle, _) => { if (owned.Contains(handle)) current.Add(handle); return true; }, IntPtr.Zero);
@@ -553,7 +781,7 @@ internal static class Native
     [DllImport("user32.dll")] private static extern bool EnumWindows(WindowCallback callback, IntPtr parameter);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
-    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] internal static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")] internal static extern bool ShowWindow(IntPtr window, int command);
     [DllImport("user32.dll")] internal static extern bool EnableWindow(IntPtr hwnd,bool enabled);
@@ -636,6 +864,13 @@ internal static class Native
         }
         if (SetWindowRgn(hwnd, region, false) == 0) DeleteObject(region);
     }
+    internal static void UpdateWindowTheme(Window window)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero) return;
+        int dark = ThemePalette.Current.IsDark ? 1 : 0;
+        DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
+    }
     public static void TryGlass(SurfaceWindow window)
     {
         var handle = new WindowInteropHelper(window).Handle;
@@ -643,7 +878,7 @@ internal static class Native
         if (source?.CompositionTarget is not null) source.CompositionTarget.BackgroundColor = Colors.Transparent;
         var margins = new Margins { Left = -1, Right = -1, Top = -1, Bottom = -1 };
         DwmExtendFrameIntoClientArea(handle, ref margins);
-        int dark = 1, rounded = 1, hostBrush = 1;
+        int dark = ThemePalette.Current.IsDark ? 1 : 0, rounded = 1, hostBrush = 1;
         DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
         DwmSetWindowAttribute(handle, 33, ref rounded, sizeof(int));
         // The compositor owns shaped live backdrop visuals within this HWND;
@@ -661,9 +896,9 @@ internal static class Native
                 }
                 finally { Marshal.FreeHGlobal(pointer); }
             }
-            window.EnsureLiveBackdrop(); window.BackdropMode = "实时系统毛玻璃";
+            window.EnsureLiveBackdrop(); window.BackdropMode = window.SkipsDesktopBlur ? "纯色不透明（跳过桌面模糊）" : "实时系统毛玻璃";
         }
         catch (Exception e) when (e is COMException or NotSupportedException or EntryPointNotFoundException)
-        { window.Root.Background = Ui.Surface; window.BackdropMode = "暗色兼容背景"; }
+        { window.Root.Background = Ui.Surface; window.BackdropMode = ThemePalette.Current.IsDark ? "暗色兼容背景" : "浅色兼容背景"; }
     }
 }

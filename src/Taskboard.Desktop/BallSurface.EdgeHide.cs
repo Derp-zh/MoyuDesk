@@ -56,16 +56,27 @@ internal sealed partial class BallSurface
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += DisplayChanged;
         Closed += (_, _) => { edgeIdle.Stop(); StopEdgeMotion(); Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= DisplayChanged; };
     }
-    private void DisplayChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(new Action(() => PreparePlacement()));
+    internal bool IsEdgeIdleRunning => edgeIdle.IsEnabled;
+    private void DisplayChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(new Action(() => { if (IsBallEnabled) PreparePlacement(); }));
     internal void ResetEdgeIdle() => edgeLastUse = DateTime.UtcNow;
-    internal void SetEdgeMenuOpen(bool open) { edgeMenuOpen = open; RestoreFromEdge(); ResetEdgeIdle(); }
+    internal void SetEdgeMenuOpen(bool open)
+    {
+        edgeMenuOpen = open;
+        if (!IsBallEnabled) { edgeIdle.Stop(); StopEdgeMotion(); IsEdgeHidden = false; return; }
+        RestoreFromEdge();
+        ResetEdgeIdle();
+    }
     internal void RefreshEdgeAutoHide()
     {
-        edgeIdle.Stop(); RestoreFromEdge(); PreparePlacement();
-        if (IsEdgeDocked)
+        edgeIdle.Stop();
+        if (!IsBallEnabled)
         {
-            if (IsVisible) edgeIdle.Start();
+            StopEdgeMotion();
+            IsEdgeHidden = false;
+            return;
         }
+        RestoreFromEdge(); PreparePlacement();
+        if (IsEdgeDocked && IsVisible) edgeIdle.Start();
         ResetEdgeIdle();
     }
     // Always persist the visible position; hidden/animated coordinates are temporary.
@@ -90,13 +101,15 @@ internal sealed partial class BallSurface
             Left = orbLeft - (expandLeft ? Width - 58 : 0);
             Top = Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height));
             edgeVisibleLeft = orbLeft;
+            if (!HasActiveMotion) CurrentCapsuleWidth = Math.Clamp(Width, 58, ExpandedWidth);
             ApplyPlacement(); ApplyDockShape(); UpdateGlassGeometry(); Native.ClipWindow(this, Height);
         }
         finally { placingBall = false; }
     }
     internal void AdvanceEdgeIdle(DateTime now)
     {
-        if (!IsEdgeDocked || !IsVisible) { RestoreFromEdge(); return; }
+        if (!IsBallEnabled) { edgeIdle.Stop(); StopEdgeMotion(); IsEdgeHidden = false; return; }
+        if (!IsEdgeDocked || !IsVisible) { edgeIdle.Stop(); RestoreFromEdge(); return; }
         if (controller.Expanded || HasActiveMotion || IsEdgeAnimating || rightDown || dragging || edgeMenuOpen || preview.IsVisible || results.IsVisible)
         { edgeLastUse = now; return; }
         var pointer = System.Windows.Forms.Cursor.Position;
@@ -119,7 +132,7 @@ internal sealed partial class BallSurface
     }
     internal void HideAtEdge(Rect desktop, bool animate = true)
     {
-        if (!IsEdgeDocked || IsEdgeHidden || controller.Expanded || HasActiveMotion || Width > 58) return;
+        if (!IsBallEnabled || !IsEdgeDocked || IsEdgeHidden || controller.Expanded || HasActiveMotion || Width > 58) return;
         edgeDesktop = desktop; edgeVisibleLeft = dockLeft ? desktop.Left : desktop.Right - Width;
         Top = Math.Clamp(Top, desktop.Top, Math.Max(desktop.Top, desktop.Bottom - Height));
         IsEdgeHidden = true; HidePopups(); UpdateBadge();
@@ -130,7 +143,7 @@ internal sealed partial class BallSurface
     internal void RestoreFromEdge(bool animate = false)
     {
         if (!IsEdgeHidden) return;
-        if (animate && IsVisible)
+        if (animate && IsVisible && IsBallEnabled)
         {
             if (!IsEdgeRestoring) StartEdgeMotion(edgeVisibleLeft, revealing: true);
             return;
@@ -140,20 +153,23 @@ internal sealed partial class BallSurface
     }
     private void StartEdgeMotion(double target, bool revealing)
     {
-        StopEdgeMotion(); edgeRevealing = revealing;
+        StopEdgeMotion();
+        if (!IsBallEnabled || !IsVisible) { IsEdgeHidden = false; return; }
+        edgeRevealing = revealing;
         var from = Left; var dotFrom = edgeDot.Opacity;
         if (!revealing) { dotFrom = 0; edgeDot.Opacity = 0; }
-          ApplyEdgeBadgeFrame(0, revealing, dotFrom);
+        ApplyEdgeBadgeFrame(0, revealing, dotFrom);
         edgeClock.Restart();
         edgeFrame = (_, _) =>
         {
+            if (!IsBallEnabled || !IsVisible) { StopEdgeMotion(); IsEdgeHidden = false; return; }
             var fraction = Math.Clamp(edgeClock.Elapsed.TotalMilliseconds / 100, 0, 1);
             Left = from + (target - from) * (1 - Math.Pow(1 - fraction, 3));
-              ApplyEdgeBadgeFrame(fraction, revealing, dotFrom);
+            ApplyEdgeBadgeFrame(fraction, revealing, dotFrom);
             Native.ClipWindow(this, Height);
             if (fraction < 1) return;
             StopEdgeMotion();
-            if (revealing) { IsEdgeHidden = false; UpdateBadge(); }
+            if (revealing) { IsEdgeHidden = false; Native.ClipWindow(this, Height); UpdateBadge(); }
         };
         CompositionTarget.Rendering += edgeFrame;
     }

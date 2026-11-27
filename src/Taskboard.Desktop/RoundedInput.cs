@@ -15,7 +15,7 @@ public static class RoundedInput
     public static bool GetEnabled(DependencyObject value) => (bool)value.GetValue(EnabledProperty);
     public static void SetEnabled(DependencyObject value, bool enabled) => value.SetValue(EnabledProperty, enabled);
     public static readonly DependencyProperty RadiusProperty = DependencyProperty.RegisterAttached(
-        "Radius", typeof(double), typeof(RoundedInput), new PropertyMetadata(18.0, (value, _) => { if (value is TextBox input) Update(input); }));
+        "Radius", typeof(double), typeof(RoundedInput), new PropertyMetadata(10.0, (value, _) => { if (value is TextBox input) Update(input); }));
     public static double GetRadius(DependencyObject value) => (double)value.GetValue(RadiusProperty);
     public static void SetRadius(DependencyObject value, double radius) => value.SetValue(RadiusProperty, radius);
     public static readonly DependencyProperty EdgeArrowNavigationProperty = DependencyProperty.RegisterAttached(
@@ -56,7 +56,10 @@ public static class RoundedInput
     private static void Resized(object sender, SizeChangedEventArgs args) => Update((TextBox)sender);
     private static void Update(TextBox input)
     {
-        var radius = Math.Max(0, Math.Min(GetRadius(input), Math.Min(input.ActualWidth, input.ActualHeight) / 2));
+        var configured = Math.Max(0, GetRadius(input));
+        if (input.Template?.FindName("frame", input) is Border frame)
+            frame.CornerRadius = new CornerRadius(configured);
+        var radius = Math.Max(0, Math.Min(configured, Math.Min(input.ActualWidth, input.ActualHeight) / 2));
         var clip = new RectangleGeometry(new Rect(0, 0, input.ActualWidth, input.ActualHeight), radius, radius);
         clip.Freeze(); input.Clip = clip;
     }

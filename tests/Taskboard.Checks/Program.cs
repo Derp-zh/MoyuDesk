@@ -92,14 +92,34 @@ first.Reminder = new Reminder { Enabled = true, Repeat = Repeat.Daily, Time = Ti
 first.Lane = Lane.Paused;
 var now = new DateTime(2026, 10, 13, 10, 0, 0);
 var due = ReminderClock.Tick(engine.State, now);
-Assert(due.Count == 1 && first.Lane == Lane.Action && first.Reminder.NextLocal == new DateTime(2026, 10, 14, 9, 0, 0), "睡眠错过多个周期只补一次且移入待操作");
+Assert(due.Count == 1 && first.Lane == Lane.Paused && first.TimerUnread && first.PendingReasons.Contains("定时提醒到期") && first.Reminder.NextLocal == new DateTime(2026, 10, 14, 9, 0, 0), "#04 睡眠错过多个周期只补一次，卡片留在原位不移列仅亮起提醒");
 Assert(ReminderClock.Tick(engine.State, now).Count == 0, "同一次到期不重复提醒");
 first.Lane = Lane.Done; first.Reminder.NextLocal = now.AddDays(-1);
 Assert(ReminderClock.Tick(engine.State, now).Count == 0, "已完成任务停止提醒");
 first.Lane = Lane.Running; first.Reminder.Repeat = Repeat.Once;
-Assert(ReminderClock.Tick(engine.State, now).Count == 1 && !first.Reminder.Enabled, "一次性提醒只执行一次");
+Assert(ReminderClock.Tick(engine.State, now).Count == 1 && first.Lane == Lane.Running && !first.Reminder.Enabled, "#04 一次性提醒只执行一次且保持原列不动");
 var weekly = new Reminder { Repeat = Repeat.Weekly, Weekday = DayOfWeek.Monday, Time = TimeSpan.FromHours(9) };
 Assert(ReminderClock.Next(weekly, new DateTime(2026, 10, 12, 9, 0, 0)) == new DateTime(2026, 10, 19, 9, 0, 0), "每周提醒严格推进到未来");
+Assert(Reminder.DefaultNextLocal(new DateTime(2026, 11, 27, 3, 40, 25)) == new DateTime(2026, 11, 27, 4, 0, 0), "#04 定时提醒默认时间对齐当日下一个小时整点(03:40->04:00)");
+Assert(Reminder.DefaultNextLocal(new DateTime(2026, 11, 27, 14, 0, 0)) == new DateTime(2026, 11, 27, 15, 0, 0), "#04 定时提醒整点时刻推进到下一个小时整点(14:00->15:00)");
+Assert(Reminder.DefaultNextLocal(new DateTime(2026, 11, 27, 23, 40, 0)) == new DateTime(2026, 11, 28, 0, 0, 0), "#04 定时提醒跨午夜对齐次日00:00(23:40->次日00:00)");
+Assert(Reminder.DefaultNextLocal(new DateTime(2026, 12, 31, 23, 59, 59)) == new DateTime(2027, 1, 1, 0, 0, 0), "#04 定时提醒跨年对齐次年00:00");
+{
+    var beforeDefault = DateTime.Now;
+    var freshReminder = new Reminder();
+    var afterDefault = DateTime.Now;
+    var expectedA = Reminder.DefaultNextLocal(beforeDefault);
+    var expectedB = Reminder.DefaultNextLocal(afterDefault);
+    Assert((freshReminder.NextLocal == expectedA || freshReminder.NextLocal == expectedB)
+        && freshReminder.Time == freshReminder.NextLocal.TimeOfDay
+        && freshReminder.Weekday == freshReminder.NextLocal.DayOfWeek,
+        "#04 新建 Reminder 默认值对齐当前日期与下一个小时整点");
+    var legacySavedJson = "{\"Enabled\":true,\"Repeat\":0,\"NextLocal\":\"2026-12-05T18:30:00\",\"Weekday\":6,\"Time\":\"18:30:00\",\"LastOccurrence\":null}";
+    var deserialized = JsonSerializer.Deserialize<Reminder>(legacySavedJson)!;
+    Assert(deserialized.Enabled && deserialized.NextLocal == new DateTime(2026, 12, 5, 18, 30, 0)
+        && deserialized.Time == new TimeSpan(18, 30, 0) && deserialized.Weekday == DayOfWeek.Saturday,
+        "#04 反序列化既有 Reminder JSON 完整保留原保存时间不被默认值覆盖");
+}
 session = engine.Edit(first.Id); session.Working.Title = "退出后恢复的未提交修改"; engine.StageSession(session);
 var draft = engine.NewSession(Lane.Refining); draft.Working.Title = "持久新建草稿"; draft.Visible = false; engine.StageSession(draft);
 var store = new AtomicStore(Path.Combine(root, "persistence")); await store.SaveAsync(Copies.Of(engine.State));
@@ -285,10 +305,128 @@ Assert(rebound.CurrentCodex!.Generation==2 && rebound.CurrentCodex.Phase==CodexP
     Assert(item.Stages[0].Codex?.ThreadId == thread, "#09 解绑支持撤销恢复原绑定");
 
     var dueIds = ReminderClock.Tick(coreEngine.State, DateTime.Today.AddHours(10));
-    Assert(dueIds.Contains(item.Id) && item.TimerUnread && item.PendingReasons.Contains("定时提醒到期"), "#22 到期后红点与原因标记存在");
+    Assert(dueIds.Contains(item.Id) && item.Lane == Lane.Running && item.TimerUnread && item.PendingReasons.Contains("定时提醒到期"), "#04/#22 到期后卡片留在原列，红点与原因标记存在");
+
+    // #22 Edit / Submit without changing reminder preserves TimerUnread; changing reminder clears it
+    var editNoReminderChange = coreEngine.Edit(item.Id);
+    Assert(item.TimerUnread, "#22 打开编辑会话不误消提醒红点");
+    editNoReminderChange.Working.Title = "改标题不改提醒";
+    item = coreEngine.Submit(editNoReminderChange);
+    Assert(item.TimerUnread && item.PendingReasons.Contains("定时提醒到期"), "#22 保存未改动提醒的编辑时保留提醒红点");
+    coreEngine.Move(item.Id, Lane.Paused, null);
+    Assert(item.TimerUnread && item.Lane == Lane.Paused, "#22 移动卡片不误消提醒红点");
+
+    // #04 Custom column task also stays in place on reminder due
+    var col = new BoardColumn { Name = "定时原位自定义列" };
+    coreEngine.State.Preferences.Columns.Add(col);
+    var cs = coreEngine.NewSession(Lane.Refining); col.Assign(cs.Working); col.Assign(cs.Original);
+    cs.Working.Title = "自定义列定时任务";
+    cs.Working.Reminder = new Reminder { Enabled = true, Repeat = Repeat.Once, Time = TimeSpan.FromHours(9), NextLocal = DateTime.Today.AddHours(9) };
+    var customTimed = coreEngine.Submit(cs);
+    var customDue = ReminderClock.Tick(coreEngine.State, DateTime.Today.AddHours(10));
+    Assert(customDue.Contains(customTimed.Id) && customTimed.ColumnId == col.Id && customTimed.TimerUnread, "#04 自定义列定时到期保持原列不变仅亮起红点");
+
+    // Edit that modifies reminder clears TimerUnread
+    var editReminderChange = coreEngine.Edit(customTimed.Id);
+    editReminderChange.Working.Reminder.Enabled = true;
+    editReminderChange.Working.Reminder.Time = TimeSpan.FromHours(15);
+    editReminderChange.Working.Reminder.NextLocal = DateTime.Today.AddDays(1).AddHours(15);
+    customTimed = coreEngine.Submit(editReminderChange);
+    Assert(!customTimed.TimerUnread && !customTimed.PendingReasons.Contains("定时提醒到期"), "#22 编辑中重设提醒并保存后清除旧到期红点");
+
     Assert(coreEngine.DismissReminder(item.Id), "#22 DismissReminder成功关闭并清除提醒");
     Assert(!item.TimerUnread && !item.PendingReasons.Contains("定时提醒到期") && !item.Reminder.Enabled, "#22 关闭提醒后红点、待处理原因和重复提醒全部清除");
     Assert(ReminderClock.Tick(coreEngine.State, DateTime.Today.AddDays(1).AddHours(10)).Count == 0, "#22 关闭后后续周期不再重新触发提醒");
+
+    // #17 EllipsizeStageDetails defaults to true + ExpandedStageDetails persistence & pruning
+    Assert(new Preferences().EllipsizeStageDetails, "#17 省略多列表阶段详情默认开启");
+    var expandedStage = item.Stages[0];
+    Assert(coreEngine.SetStageDetailsExpanded(item.Id, expandedStage.Id, true) && coreEngine.IsStageDetailsExpanded(item.Id, expandedStage.Id), "#17 记录阶段展开状态");
+    var expStore = new AtomicStore(Path.Combine(root, "expanded-stage"));
+    await expStore.SaveAsync(Copies.Of(coreEngine.State));
+    var expLoaded = expStore.Load();
+    Assert(expLoaded.Preferences.ExpandedStageDetails.Contains(BoardEngine.StageDetailsKey(item.Id, expandedStage.Id)), "#17 阶段展开状态持久化跨重启保留");
+    var cfgExp = ConfigurationBackup.Capture(coreEngine.State, root);
+    Assert(cfgExp.Preferences.ExpandedStageDetails.Count == 0, "#17 配置备份不夹带任务阶段展开键");
+    Assert(cfgExp.Apply(coreEngine.State).Preferences.ExpandedStageDetails.Contains(BoardEngine.StageDetailsKey(item.Id, expandedStage.Id)), "#17 导入配置保留本地阶段展开状态");
+    coreEngine.Delete(item.Id);
+    Assert(!coreEngine.State.Preferences.ExpandedStageDetails.Contains(BoardEngine.StageDetailsKey(item.Id, expandedStage.Id)), "#17 删除任务自动清理阶段展开记录防止膨胀");
+}
+// 0.9.56 Appearance theme preferences: defaults, normalization, Copies.Of/Same, backup & AtomicStore persistence
+{
+    var themePrefs = new Preferences();
+    Assert(themePrefs.ThemeMode == ThemeMode.Dark
+        && themePrefs.DarkThemePreset == "midnight-cyan"
+        && themePrefs.LightThemePreset == "daylight-mist",
+        "#Theme 主题偏好默认深夜模式(midnight-cyan)与默认浅色(daylight-mist)");
+
+    themePrefs.ThemeMode = (ThemeMode)999;
+    themePrefs.DarkThemePreset = "non-existent-dark";
+    themePrefs.LightThemePreset = "non-existent-light";
+    Validation.Normalize(themePrefs);
+    Assert(themePrefs.ThemeMode == ThemeMode.Dark
+        && themePrefs.DarkThemePreset == "midnight-cyan"
+        && themePrefs.LightThemePreset == "daylight-mist",
+        "#Theme Validation.Normalize 将非法 ThemeMode 回退 Dark、未知配色回退默认值");
+
+    themePrefs.ThemeMode = ThemeMode.System;
+    themePrefs.DarkThemePreset = "OBSIDIAN-AMBER";
+    themePrefs.LightThemePreset = "WARM-PAPER";
+    Validation.Normalize(themePrefs);
+    Assert(themePrefs.DarkThemePreset == "obsidian-amber" && themePrefs.LightThemePreset == "warm-paper",
+        "#Theme Validation.Normalize 规范化合法配色 ID 大小写");
+
+    var clonedPrefs = Copies.Of(themePrefs);
+    Assert(Copies.Same(themePrefs, clonedPrefs)
+        && clonedPrefs.ThemeMode == ThemeMode.System
+        && clonedPrefs.DarkThemePreset == "obsidian-amber"
+        && clonedPrefs.LightThemePreset == "warm-paper",
+        "#Theme Copies.Of 与 Copies.Same 完整保留并比较主题模式与深浅色预设");
+    clonedPrefs.LightThemePreset = "mint-breeze";
+    Assert(!Copies.Same(themePrefs, clonedPrefs), "#Theme Copies.Same 准确识别浅色预设差异");
+
+    var themeState = new BoardState();
+    themeState.Preferences.ThemeMode = ThemeMode.Light;
+    themeState.Preferences.DarkThemePreset = "forest-jade";
+    themeState.Preferences.LightThemePreset = "lavender-day";
+    var themeStore = new AtomicStore(Path.Combine(root, "theme-persistence"));
+    await themeStore.SaveAsync(themeState);
+    var themeReloaded = themeStore.Load();
+    Assert(themeReloaded.Preferences.ThemeMode == ThemeMode.Light
+        && themeReloaded.Preferences.DarkThemePreset == "forest-jade"
+        && themeReloaded.Preferences.LightThemePreset == "lavender-day",
+        "#Theme AtomicStore 保存并重载完整保留主题模式与深浅色预设");
+
+    var themeBackup = ConfigurationBackup.Capture(themeState, root);
+    var themeBackupFile = Path.Combine(root, "theme-config.json");
+    themeBackup.Write(themeBackupFile);
+    var themeBackupRead = ConfigurationBackup.Read(themeBackupFile);
+    var appliedTheme = themeBackupRead.Apply(new BoardState());
+    Assert(appliedTheme.Preferences.ThemeMode == ThemeMode.Light
+        && appliedTheme.Preferences.DarkThemePreset == "forest-jade"
+        && appliedTheme.Preferences.LightThemePreset == "lavender-day",
+        "#Theme ConfigurationBackup 导出与导入保留主题设置");
+
+    var legacyNoThemeJson = JsonSerializer.Serialize(new BoardState())
+        .Replace("\"ThemeMode\":0,", "")
+        .Replace("\"DarkThemePreset\":\"midnight-cyan\",", "")
+        .Replace("\"LightThemePreset\":\"daylight-mist\",", "");
+    var legacyLoaded = JsonSerializer.Deserialize<BoardState>(legacyNoThemeJson)!;
+    Assert(legacyLoaded.Preferences.ThemeMode == ThemeMode.Dark
+        && legacyLoaded.Preferences.DarkThemePreset == "midnight-cyan"
+        && legacyLoaded.Preferences.LightThemePreset == "daylight-mist",
+        "#Theme 旧版无主题字段数据反序列化默认采用深夜青蓝");
+
+    var futureUnknownThemeJson = JsonSerializer.Serialize(new BoardState())
+        .Replace("\"ThemeMode\":0", "\"ThemeMode\":77")
+        .Replace("\"DarkThemePreset\":\"midnight-cyan\"", "\"DarkThemePreset\":\"future-neon\"")
+        .Replace("\"LightThemePreset\":\"daylight-mist\"", "\"LightThemePreset\":\"future-cloud\"");
+    var futureLoaded = JsonSerializer.Deserialize<BoardState>(futureUnknownThemeJson)!;
+    Validation.Check(futureLoaded);
+    Assert(futureLoaded.Preferences.ThemeMode == ThemeMode.Dark
+        && futureLoaded.Preferences.DarkThemePreset == "midnight-cyan"
+        && futureLoaded.Preferences.LightThemePreset == "daylight-mist",
+        "#Theme 未知主题配置 JSON 反序列化自动安全回退并通过校验");
 }
 for (var i = 0; i < 300; i++)
 {

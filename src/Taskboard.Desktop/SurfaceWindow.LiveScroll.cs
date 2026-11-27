@@ -51,7 +51,13 @@ internal partial class SurfaceWindow
         scrollDuration = ScrollMotion.DurationMs; scrollClock.Reset();
         new WindowInteropHelper(this).EnsureHandle(); UpdateGlassGeometry();
         contentHost.AnimationHidden = false; contentHost.Visibility = Visibility.Visible; Root.Opacity = 1;
-        Root.Measure(new Size(Width, Height)); Root.Arrange(new Rect(0, 0, Width, Height)); Root.UpdateLayout();
+        // Skip throwaway pre-show Measure/Arrange when ContentHandle is not yet created:
+        // ShowImmediately() attaches Root to GlassContentHost's HwndSource and runs
+        // WPF's real first layout pass right away, avoiding duplicate full-tree layout.
+        if (ContentHandle != IntPtr.Zero)
+        {
+            Root.Measure(new Size(Width, Height)); Root.Arrange(new Rect(0, 0, Width, Height)); Root.UpdateLayout();
+        }
         scrollGlow.Opacity = initialLight;
         scrollGlow.Visibility = HorizontalRevealAnchor == 0 ? Visibility.Visible : Visibility.Collapsed;
         Native.ClipLiveScroll(this, from);
@@ -59,12 +65,13 @@ internal partial class SurfaceWindow
         Native.ShowWindow(ContentHandle, 4); IsHitTestVisible = visible;
         await Dispatcher.InvokeAsync(() => Root.UpdateLayout(), DispatcherPriority.Render);
         if (generation != motion) return;
-        // Real controls reach composition before the shared 100ms timeline.
-        var prepared = new TaskCompletionSource<bool>(); var rendered = 0;
-        var preparationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(80) };
+        // Wait for one composition tick (with tight 25ms fallback) so real controls
+        // reach composition before the 100ms reveal starts, without adding ~100ms dead wait.
+        var prepared = new TaskCompletionSource<bool>();
+        var preparationDeadline = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(25) };
         preparationDeadline.Tick += (_, _) => prepared.TrySetResult(true);
         cancelLivePreparation = () => { preparationDeadline.Stop(); prepared.TrySetResult(false); };
-        liveScrollFrame = (_, _) => { if (++rendered >= 2) prepared.TrySetResult(true); };
+        liveScrollFrame = (_, _) => prepared.TrySetResult(true);
         CompositionTarget.Rendering += liveScrollFrame;
         preparationDeadline.Start(); var ready = await prepared.Task; preparationDeadline.Stop();
         if (!ready || generation != motion) return;

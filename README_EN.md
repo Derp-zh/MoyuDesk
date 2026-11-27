@@ -1,92 +1,184 @@
-<!-- README_SYNC: source=working-tree; updated=2026-11-20 -->
-[简体中文](README.md) · English
+<!-- README_SYNC: source=working-tree; updated=2026-11-27 -->
 
-# MoyuDesk
+<p align="center">
+  <a href="./README.md">简体中文</a> · English
+</p>
 
-A Windows desktop task board for capturing ideas, organizing work, and linking individual task stages to Codex conversations.
+<p align="center">
+  <img src="./src/Taskboard.Desktop/Assets/orb.png" alt="MoyuDesk Logo" width="112" height="112" />
+</p>
 
-Built for people juggling several tasks and AI conversations: keep your ideas, ongoing work, and tasks that need your attention visible on the desktop, ready to pick up again.
+<h1 align="center">MoyuDesk (摸鱼台)</h1>
 
-Find it useful? [Star the project](https://github.com/Derp-zh/MoyuDesk) to keep it handy.
+<p align="center">
+  A local-first Windows desktop task board built for parallel work and AI coding sessions—living in the system tray and a floating orb with zero taskbar clutter, passively aligning task stages with Codex, DSH, and Claude Code sessions.
+</p>
 
-[Download for Windows](https://github.com/Derp-zh/MoyuDesk/releases/latest) · [Report an issue](https://github.com/Derp-zh/MoyuDesk/issues)
+<p align="center">
+  If MoyuDesk saves you from constantly hunting through tabs and AI chat windows, consider <a href="https://github.com/Derp-zh/MoyuDesk">starring the repository</a> to bookmark it and help other desktop AI users find it.
+</p>
 
-Version **0.9.53** introduces the MoyuDesk name and improves stage editing, responsiveness for long cards, and alert handling for stages linked to the same conversation. See the [current status](docs/STATUS.md) and [changelog](CHANGELOG.md).
+<p align="center">
+  <a href="https://github.com/Derp-zh/MoyuDesk/stargazers"><img src="https://img.shields.io/github/stars/Derp-zh/MoyuDesk?style=flat-square&color=96DACC&labelColor=192333" alt="GitHub Stars" /></a>
+  <a href="https://github.com/Derp-zh/MoyuDesk/releases/latest"><img src="https://img.shields.io/github/v/release/Derp-zh/MoyuDesk?style=flat-square&color=5E789B&labelColor=192333" alt="Latest Release" /></a>
+  <a href="https://github.com/Derp-zh/MoyuDesk/releases/latest"><img src="https://img.shields.io/badge/Windows-10%202004%2B%20%7C%2011%20x64-0078D4?style=flat-square&labelColor=192333" alt="Windows 10/11 x64" /></a>
+  <a href="./docs/ARCHITECTURE.md"><img src="https://img.shields.io/badge/.NET-8.0%20WPF-512BD4?style=flat-square&labelColor=192333" alt=".NET 8.0 WPF" /></a>
+  <a href="https://github.com/Derp-zh/MoyuDesk/issues"><img src="https://img.shields.io/github/issues/Derp-zh/MoyuDesk?style=flat-square&color=E9C582&labelColor=192333" alt="GitHub Issues" /></a>
+  <a href="https://github.com/Derp-zh/MoyuDesk/commits"><img src="https://img.shields.io/github/last-commit/Derp-zh/MoyuDesk?style=flat-square&color=36574F&labelColor=192333" alt="Last Commit" /></a>
+</p>
 
-## What is it for?
+<p align="center">
+  <a href="https://github.com/Derp-zh/MoyuDesk/releases/latest"><strong>Download for Windows</strong></a> ·
+  <a href="./CHANGELOG.md">Changelog</a> ·
+  <a href="./docs/STATUS.md">Status &amp; Boundaries</a> ·
+  <a href="https://github.com/Derp-zh/MoyuDesk/issues">Report an Issue</a>
+</p>
 
-Suppose you have several projects underway. Some are still ideas, some are being worked on by AI, and others need an answer or a review from you. Put them on the board, record the steps and related conversations, and find the right task when you need to step in.
+---
 
-The default board has six lists. Each is a separate window you can move and resize:
+> **Target release: 0.9.56** — ships with the official MoyuDesk mascot icon, a dedicated **Appearance** settings page (Dark / Light / System themes plus live color presets), strict zero-taskbar presence, and builds on 0.9.54–0.9.55 improvements including a click-through pinned Needs Action column with hover scrolling, stay-in-place reminders aligned to the next full hour, faster long-card editor opening, single-`Ctrl` TSF IME switching (e.g., WeType), and high-contrast rounded UI controls.
 
-| List | What goes here |
-| --- | --- |
-| Ideas | Quick notes and things you might do later |
-| Refining | Tasks whose requirements or approach still need work |
-| In progress | Work currently underway |
-| Needs action | Tasks waiting for your answer, approval, review, or next step |
-| On hold | Work you want to keep but are not pursuing right now |
-| Done | Tasks you have personally confirmed as complete |
+## Why MoyuDesk
 
-Rename, add, or hide lists. All six built-in lists are protected from deletion; empty custom lists can still be deleted. Drag tasks between lists or reorder them within a list.
+When you run several projects and AI coding sessions at once, the real friction is rarely a single task—it is **switching back and forth to check which agent is waiting for an answer, which run needs review, and where you left your notes**.
 
-## Features
+| Everyday Friction | Manual Workflow | With MoyuDesk |
+| --- | --- | --- |
+| Tracking parallel AI sessions | Click through multiple desktop apps and threads to see who stopped | Bind each task stage to a local AI session; waiting questions, approvals, or completed runs automatically move the card to **Needs action** with one-click jump back |
+| Keeping todos visible without blocking work | Sticky notes or web boards clutter the taskbar and intercept clicks | **Zero taskbar footprint**; pin **Needs action** as a translucent click-through overlay whose cards still scroll smoothly on mouse-wheel hover |
+| Reminders disrupting board layout | Due reminders pop over work or forcibly relocate on-hold items | New reminders default to today + next full hour; due cards **stay right where they are** with an in-place badge and compact hover dismiss bubble |
+| Local privacy & painless upgrades | Cloud accounts required, or manual folder replacement breaking startup links | 100% local storage with no backend server; per-user fixed-folder install/upgrade/rollback scripts plus in-app GitHub Releases updater with SHA256 verification |
 
-| Feature | What you can do |
-| --- | --- |
-| Quick capture | Type directly into the Ideas list, or open the full editor to add a name, details, and categories |
-| Multiple drafts | Keep several unfinished entries in a stack, switch between them, and resume drafts after restarting |
-| Task stages | Split a task into named stages, each with its own notes, running flag, and conversation link; delete with X while retaining at least one stage and one running stage |
-| Labels and priority | Assign multiple AI platform labels and one priority; customize option names and colors |
-| Search | Search task names and all stage details, then jump straight to the matching card |
-| Scheduled reminders | Set a one-time, daily, or weekly reminder; when due, the task moves to Needs action and you receive a notification |
-| Needs-action preview | See the pending count on the floating button; hover while the board is collapsed to preview tasks, then click to locate one |
-| Undo and redo | Reverse or reapply the last 20 committed edits in the current session, including accidental deletions, moves, and field changes |
-| Task archive | Manually archive Done or On hold tasks, or automatically archive Done tasks after a configurable number of days; archived tasks can be restored |
-| Floating controls | Toggle the board from the floating button, tray, or global shortcut; dock the floating button to the right edge of the desktop with auto-hide |
-| Desktop layout | Position and resize lists independently, scale the group, remember positions, and adjust transparency separately for lists, editors, and the floating button |
+<p align="center">
+  <img src="./src/Taskboard.Desktop/Assets/HelpScreenshots/focus-on.png" alt="MoyuDesk Focus Mode layout preview" width="920" />
+  <br />
+  <sub>Focus Mode preview: two wide columns (In progress / Needs action) paired with a collapsible Done rail</sub>
+</p>
 
-Collapsing the board keeps the app running, with reminders and unsubmitted input preserved. Choose Exit from the system tray to quit completely.
+---
 
-## Link Codex conversations
+## Key Capabilities
 
-**Each stage can link to an existing Codex conversation**, with its name and status shown on the card. Different stages of the same task can use different conversations.
+### 1. Zero-Taskbar Desktop Board & Floating Orb
+- **Tray + Floating Orb + Hotkey**: Never creates a Windows taskbar button. Toggle the board anytime from the floating orb, system tray, or global shortcut (`Ctrl+~` by default). The orb supports left/right desktop edge docking with auto-hide and can also be hidden completely from the tray.
+- **Six Independent Lists & Focus Mode**: Starts with six individually movable, resizable frosted-glass windows (**Ideas, Refining, In progress, Needs action, On hold, Done**), plus custom lists, drag-and-drop card reordering, `Shift`-drag group repositioning from the bottom-left handle, and a two-wide-one-narrow Focus Mode.
+- **Fullscreen Game & IME Friendly**: Collapses cleanly on outside clicks even over fullscreen/borderless games; ignores candidate windows from major IMEs (Microsoft IME, WeType/WeChat Input, Doubao, Zhipu AI, Sogou, iFlytek, Baidu, QQ, ShouXin, Rime/Weasel, PIME, Google Japanese Input, Mozc, ATOK) and bridges `VK_CONTROL` to TSF so single-`Ctrl` language toggling works inside text inputs.
 
-The board connects to the existing local state channel at startup. When reliable state is available, tasks can move automatically between In progress and Needs action:
+### 2. Pinned Click-Through "Needs Action" Column
+- Click the circular pushpin button in the **Needs action** column header to pin it on top of your desktop with configurable translucency (`70%` transparent by default, tuned via a dedicated slider in Settings → Windows).
+- **Click-Through + Wheel Scroll**: Every click passes straight through to underlying apps or games except the pushpin button itself (used to unpin). Hovering the pointer over an overflowing pinned list still lets you scroll smoothly with the mouse wheel; when there is nothing to scroll, wheel events pass right through.
+- **Hotkey State Memory**: Hiding and re-summoning with the global shortcut preserves the pinned, translucent, click-through state.
 
-- Waiting for your answer or approval, or finishing a run that needs review, moves the task to Needs action.
-- Actual execution resuming moves it back to In progress. If several stages are active, a stage still waiting for attention takes priority.
-- A completed AI run never marks the task Done automatically. You decide when the task is finished.
+### 3. Dedicated Appearance Settings & Live Themes
+- Choose from three primary modes in the new **Appearance** settings page:
+  - **Dark mode (default)**: signature cyan accent on deep slate glass;
+  - **Light mode**: low-glare daylight theme with crisp high-contrast controls;
+  - **Follow system**: listens to Windows light/dark theme changes and switches live.
+- Additional dark and light color presets live right below for instant live switching across columns, editors, settings, orb, and menus.
+- Independent transparency sliders cover lists, floating editors, the orb, and the pinned column; setting any surface to `0%` transparency (fully opaque) automatically bypasses live desktop backdrop blur to save GPU work.
 
-**Check the connection and view existing monitoring results from Settings → AI platforms. No script, observation port, or Codex restart is required.** The chat catalog reads the existing local database without starting a helper service. Testing linked chats reuses received state and adds no subscription. Catalog access, the local connection, and per-chat capability are reported separately. No messages, answers, or approvals are sent. See the [current module guide](docs/current/README.md).
+### 4. Multi-Stage Editing, Long-Card Performance & In-Place Reminders
+- **Stage-Based Tasks**: Split any task into named stages (strictly **Running** or **Not running**—no auto-completion), edit stage names inside a single unified capsule input, drag to reorder stages, configure the default running state for new stages with automatic focus, use Up/Down on first/last lines to jump to start/end, and use dark rounded context menus.
+- **Fast Long-Text Cards**: Multi-list stage descriptions default to proportional line truncation with clickable `[…]` / `[▴]` expand/collapse bubbles whose state persists across sessions; the task editor uses lightweight initial viewport rendering and on-demand hydration to open multi-stage long-text cards quickly.
+- **Stacked Drafts, Undo & Archive**: Keep multiple unfinished drafts stacked and switch between them (preserved across restarts), undo/redo the last 20 committed edits per session, and archive/restore completed or on-hold work manually or by age.
+- **Stay-in-Place Reminders**: Supports one-time, daily, and weekly schedules. Enabling a reminder defaults to the **current date and next full hour**, using independent scrollable hour and minute lists. When due, **cards stay in their original column** and show a dot badge whose compact hover bubble displays the reminder time and a one-click Dismiss button.
 
-Current source passively reads existing local records and behavior logs, without Codex pipes, ports, subscriptions, or CLI startup. Foreground question detection has a known failure; full daily scenario coverage remains incomplete. See [current scope](docs/current/C01-Codex接入.md) and [status](docs/current/STATUS.md).
+### 5. Passive Per-Stage AI Session Tracking
+- Link each stage independently to a local AI session (different stages in one task can track different sessions).
+- **Bounded Automatic Movement**: Only built-in **In progress ↔ Needs action** move automatically. Waiting questions, approvals, failures/interrupts, or runs ready for review move the card to **Needs action**; confirmed subsequent execution returns it to **In progress**. MoyuDesk **never marks a task Done automatically**.
+- **Drag-to-Bind & One-Click Jump**: Drag directly from a card or editor onto a native client conversation to bind, drop onto the binding picker's Unbind zone to clear, or left-click the card jump button to switch straight to the conversation (successful jump clears the orange-red attention indicator across all stages sharing that session; unbound cards hide the jump button).
 
-AI platform labels can also serve as ordinary categories; choosing one does not connect that platform. Feishu two-way sync and live DSH or WorkBuddy integration are not implemented.
+---
 
-## Custom notification sounds
+## Quick Start
 
-The Notification sounds settings let you configure a Windows notification sound for each application, using the built-in sound or your own audio, with playback previews. This module is separate from Codex status observation; notifications do not move tasks between lists.
+Requires **64-bit Windows 10 (version 2004 or later) or Windows 11**. Release archives are self-contained with `.NET 8` bundled—no separate runtime install needed.
 
-Listening is off by default. Actual notification capture, replacement of the original system sound, and restoration still need separate validation for the target application and Windows environment.
+### Option 1: Portable Run or Fixed Per-User Install (Recommended)
 
-## Download and get started
+1. Download `MoyuDesk-*-portable-win-x64.zip` (and optional checksum file) from the [latest GitHub Release](https://github.com/Derp-zh/MoyuDesk/releases/latest).
+2. Extract the full archive, then either:
+   - **Run portable as-is**: launch `MoyuDesk.exe` directly from the extracted folder.
+   - **Install to a fixed user folder for seamless upgrades (no admin rights)**: double-click `安装或升级摸鱼台.cmd`, or run:
 
-For 64-bit Windows 10 (version 2004 or later) and Windows 11.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
 
-1. Open the [latest release](https://github.com/Derp-zh/MoyuDesk/releases/latest) and download the Windows x64 ZIP.
-2. Extract the entire archive and run `MoyuDesk.exe`. The package includes .NET, so no separate runtime installation is needed. Keep the extracted folder intact.
-3. Click the floating button to open the board. Capture an idea directly in the Ideas list, or create a task from any list.
-4. Add reminders to individual tasks. Adjust windows, the shortcut, and startup at sign-in in Settings. The default global shortcut is `Ctrl+~`.
+The installer places binaries in `%LOCALAPPDATA%\MoyuDesk\app`, keeps desktop/Start Menu shortcuts and auto-start pointing to that stable path, backs up the previous version to `%LOCALAPPDATA%\MoyuDesk\.rollback-<version>` before swapping, and **never touches** your task/config data in `%LOCALAPPDATA%\InstantTaskboard`.
 
-Before upgrading, exit the old version from its tray menu, then extract the new version in full. See the [current module guide](docs/current/README.md) for more.
+- **Zero-server in-app updates**: Open **Settings → General → Version & Updates** to check the public GitHub Releases API, verify `SHA256SUMS.txt`, and run the atomic upgrade flow automatically.
+- **Roll back or uninstall (preserving your tasks and settings)**:
 
-## Local data
+```powershell
+# Roll back to the previous installed version (user data stays untouched)
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\MoyuDesk\app\scripts\rollback.ps1"
 
-Tasks, stages, and drafts are stored locally. The default task directory is `%LOCALAPPDATA%/InstantTaskboard/data`; configuration is in `%LOCALAPPDATA%/InstantTaskboard/config`. Both locations can be changed independently in Settings.
+# Uninstall program binaries and shortcuts only (keeps %LOCALAPPDATA%\InstantTaskboard)
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\MoyuDesk\app\scripts\uninstall.ps1"
+```
 
-App files and data are stored separately. When moving to another computer, take the actual data and configuration directories with you. The configuration-backup feature saves settings only: **it does not include tasks or drafts**.
+### Option 2: Build & Run Offscreen Checks from Source
 
-Report problems or suggestions through [Issues](https://github.com/Derp-zh/MoyuDesk/issues), or [star the project](https://github.com/Derp-zh/MoyuDesk) to find it again later.
+Requires the `.NET 8 SDK` (Windows x64) and `Python 3`:
 
-The repository currently has no LICENSE file. Terms for using and redistributing the source have not been declared.
+```powershell
+# Static module ownership and retired-code check
+python tools/check_project.py
+
+# Build desktop app
+dotnet build src/Taskboard.Desktop/Taskboard.Desktop.csproj
+
+# Run offscreen core tests in an isolated data directory
+dotnet run --project tests/Taskboard.Checks -- --data-dir test-output/checks-run
+
+# Run offscreen binding and UI regression tests
+dotnet run --project tests/Taskboard.Binding.Tests -- --data-dir test-output/binding-run
+
+# Build a self-contained Windows x64 portable package into a fresh folder
+powershell -ExecutionPolicy Bypass -File tools/Build-Portable.ps1 -Output release/MoyuDesk-local
+```
+
+> Pass `--data-dir <folder>` when testing `MoyuDesk.exe` to stay completely isolated from `%LOCALAPPDATA%\InstantTaskboard`.
+
+---
+
+## AI Platform Support & Honest Boundaries
+
+MoyuDesk is designed to **observe passively without driving or interfering with your AI clients**. Current status and boundaries (see [Status & Boundaries](./docs/STATUS.md)):
+
+| Platform / Module | Current Status | Mechanism & Boundaries |
+| --- | --- | --- |
+| **Codex** | Implemented & in daily use | Passive read-only access to local SQLite catalog, behavior logs, and foreground read-only native request controls; **no pipes/ports, no CLI spawning, no sending/answering/approving**; supports drag-to-bind and one-click jump ([spec](./docs/current/C01-Codex接入.md)) |
+| **DSH** | Implemented | Read-only native v4 compressed log observer (reuses DSH's own runtime first); supports drag-to-bind and one-click jump ([spec](./docs/current/C02-DSH接入探索.md)) |
+| **Claude Code** | Merged in code; live client validation pending | Native Hook event ingestion + desktop Code session catalog stable-ID mapping; full live client lifecycle not yet tested due to lack of a logged-in local client; one-click jump not yet supported ([spec](./docs/current/C03-Claude监听.md)) |
+| **WorkBuddy / Doubao** | Feasibility research only | No product integration code implemented yet ([research](./docs/research/20261117-workbuddy-doubao-listeners.md)) |
+| **Feishu Sync** | Not implemented (UI hidden) | Deferred until target schema and sync rules are finalized ([research](./docs/research/feishu-sync.md)) |
+| **Custom Windows Notification Sounds** | Implemented (off by default) | Separate from AI tracking; replaces per-app Windows notification audio with previews and never moves cards; real capture and original-sound restoration should be validated per target app ([spec](./docs/current/N01-通知监听.md)) |
+
+**Known boundaries**:
+- AI platform tags can also be used as plain task labels; tagging a card does not imply a live connection to that platform.
+- Edge cases such as high-concurrency multi-approval Codex runs, long-running multi-DPI DSH setups, or elevated/anti-cheat fullscreen games blocking non-elevated outside-click hooks remain documented in [Status & Boundaries](./docs/STATUS.md).
+
+---
+
+## Architecture, Local Data & Privacy
+
+The repository separates the headless engine (`src/Taskboard.Core`) from the Windows desktop shell (`src/Taskboard.Desktop`, built with WPF, WinForms tray integration, Direct2D/D3D11 Composition, and UIAutomation) across 14 explicit modules enforced by `Modules/*.props` and `python tools/check_project.py`:
+
+- **Architecture & Build/Test Tools**: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- **Active Module Specifications (M01–M12 / C01–C03 / N01 / SURFACE)**: [docs/current/README.md](./docs/current/README.md)
+- **Shared Surface Impact Map (glass, themes, hit-testing, motion, input)**: [docs/architecture/SHARED-CODE.md](./docs/architecture/SHARED-CODE.md)
+
+**Local-First Data & Privacy**:
+- All tasks, stages, drafts, and preferences stay on your machine—**no accounts, no telemetry, and no upload of task text or AI chat transcripts**.
+- Default paths: `%LOCALAPPDATA%\InstantTaskboard\data` (tasks and drafts) and `%LOCALAPPDATA%\InstantTaskboard\config` (settings and layout), both customizable in Settings and completely separated from program binaries.
+- **Configuration Backup** exports settings, layout, and option definitions only—**it does not include tasks or drafts**. Back up your data directory alongside settings when moving machines.
+- The only optional network request happens when you manually click **Check for Updates**, querying the public GitHub Releases API to check and download verified release assets.
+
+---
+
+## Community & License
+
+- If MoyuDesk fits your workflow, consider giving it a **Star** on [GitHub](https://github.com/Derp-zh/MoyuDesk) or watching [Releases](https://github.com/Derp-zh/MoyuDesk/releases) for new builds. Bug reports and feature ideas are always welcome in [Issues](https://github.com/Derp-zh/MoyuDesk/issues).
+- **License**: This repository currently **does not include a `LICENSE` file**, so terms for using, modifying, or redistributing the source code have not been declared yet. Third-party notices are listed in [THIRD-PARTY-NOTICES.txt](./docs/THIRD-PARTY-NOTICES.txt).

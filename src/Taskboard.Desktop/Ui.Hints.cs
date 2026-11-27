@@ -41,7 +41,7 @@ internal static partial class Ui
             CustomPopupPlacementCallback = (size, _, _) => [new System.Windows.Controls.Primitives.CustomPopupPlacement(new Point(center.X - size.Width / 2, center.Y), System.Windows.Controls.Primitives.PopupPrimaryAxis.None)],
             Template = HintTemplate(), HasDropShadow = false, Tag = position,
             StaysOpen = true, Padding = new Thickness(0), Background = Brushes.Transparent, BorderThickness = new Thickness(0),
-            Content = new Border { CornerRadius = new CornerRadius(12), Background = Brush("#F0243044"), BorderBrush = Line, BorderThickness = new Thickness(1),
+            Content = new Border { CornerRadius = new CornerRadius(12), Background = HintBackground, BorderBrush = Line, BorderThickness = new Thickness(1),
                 Padding = new Thickness(11, 8, 11, 8), Child = new TextBlock { Text = message, Foreground = Text, FontSize = 12 } } };
     }
     internal static void OpenHint(ToolTip bubble)

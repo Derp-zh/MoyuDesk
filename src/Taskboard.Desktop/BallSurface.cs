@@ -40,39 +40,66 @@ internal sealed partial class BallSurface : SurfaceWindow
     private readonly System.Windows.Shapes.Shape orbFill;
     private readonly System.Windows.Shapes.Path capsuleFill;
     private readonly System.Windows.Shapes.Path orbStroke;
+    internal bool IsBallEnabled => controller is not null && controller.Engine.State.Preferences.BallVisible;
     internal bool IsEdgeDocked => controller is not null && controller.Engine.State.Preferences.BallEdgeAutoHide;
-    internal override System.Collections.Generic.IEnumerable<GlassRegion> GlassRegions() =>
-        [new(new Rect(expandLeft ? Width - 370 : 0, 0, 370, Height), Radius: GlassRadius,
+    internal double CurrentCapsuleWidth { get; private set; } = 58;
+    internal double SearchOpacity => expanded.Opacity;
+    internal void SetCapsuleRevealState(double capsuleWidth, double searchOpacity)
+    {
+        CurrentCapsuleWidth = Math.Clamp(capsuleWidth, 58, Math.Max(58, ExpandedWidth));
+        expanded.Opacity = Math.Clamp(searchOpacity, 0, 1);
+    }
+    internal override System.Collections.Generic.IEnumerable<GlassRegion> GlassRegions()
+    {
+        var visible = Math.Clamp(CurrentCapsuleWidth, 58, Math.Max(58, Width));
+        var x = expandLeft ? Width - visible : 0;
+        return [new(new Rect(x, 0, visible, Height), Radius: GlassRadius,
             FlatRight: IsEdgeDocked && !dockLeft, FlatLeft: DockedLeft)];
+    }
     protected override void ApplyGlassTint()
     {
         Root.Background = Brushes.Transparent;
-        if (orbFill is not null) orbFill.Fill = Ui.Brush($"#{(int)Math.Round(255*(1-GlassTransparency/100)):X2}192333");
+        if (orbFill is not null) orbFill.Fill = GlassTintBrush;
         if (capsuleFill is not null && orbFill is not null) capsuleFill.Fill = orbFill.Fill;
         if (orb is not null) ApplyDockShape();
+    }
+    public override void ApplyTheme()
+    {
+        if (countBubble is not null)
+        {
+            countBubble.Background = ThemePalette.Current.CountBubbleBackground;
+            countBubble.BorderBrush = Ui.Danger;
+        }
+        if (edgeDot is not null) edgeDot.Fill = Ui.Danger;
+        base.ApplyTheme();
+        results?.ApplyTheme();
+        preview?.ApplyTheme();
+        if (results?.IsVisible == true || preview?.IsVisible == true) RefreshData();
     }
     public BallSurface(BoardController controller) : base(58, 58)
     {
         this.controller = controller;
         WindowLayer = 3;
         Title = Brand.Name + "入口";
-        orbFill = new System.Windows.Shapes.Path { Width=58,Height=58,HorizontalAlignment=HorizontalAlignment.Right,IsHitTestVisible = false, Fill = Ui.Brush("#99192333") };
+        orbFill = new System.Windows.Shapes.Path { Width=58,Height=58,HorizontalAlignment=HorizontalAlignment.Right,IsHitTestVisible = false, Fill = GlassTintBrush };
         capsuleFill = new System.Windows.Shapes.Path { IsHitTestVisible=false,Fill=orbFill.Fill,Visibility=Visibility.Collapsed };
         Root.Children.Add(orbFill);
         Root.Children.Add(capsuleFill);
         expanded = new Grid { Visibility = Visibility.Collapsed, Width = 306, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(4, 3, 60, 3) };
-        expanded.ColumnDefinitions.Add(new ColumnDefinition()); expanded.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
-        expanded.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
-        search = Ui.Input(); search.Margin = new Thickness(4, 7, 0, 7); search.ToolTip = "搜索任务名称与所有阶段详情";
+        expanded.ColumnDefinitions.Add(new ColumnDefinition()); expanded.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        expanded.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+        search = Ui.Input(); search.Height = 36; search.Padding = new Thickness(9, 0, 9, 0); search.VerticalContentAlignment = VerticalAlignment.Center; search.VerticalAlignment = VerticalAlignment.Center; search.Margin = new Thickness(4, 8, 0, 8); search.ToolTip = "搜索任务名称与所有阶段详情";
         expanded.Children.Add(search);
-        var clear = Ui.Button("×", () => search.Clear()); clear.Cursor = Cursors.Arrow; clear.Padding = new Thickness(0); Grid.SetColumn(clear, 1); expanded.Children.Add(clear);
-        var settings = Ui.Button("设置", controller.ToggleSettings); settings.Cursor = Cursors.Arrow; settings.Padding = new Thickness(3); Grid.SetColumn(settings, 2); expanded.Children.Add(settings);
+        var clear = Ui.Button("×", () => search.Clear()); clear.Tag = "BallSearchClear"; clear.Cursor = Cursors.Arrow; clear.Width = clear.Height = 28; clear.Padding = new Thickness(0); clear.Margin = new Thickness(2, 0, 2, 0); clear.VerticalAlignment = VerticalAlignment.Center; Ui.ApplyCircularStyle(clear); Grid.SetColumn(clear, 1); expanded.Children.Add(clear);
+        var settings = Ui.Button("设置", controller.ToggleSettings); settings.Tag = "BallSettingsButton"; settings.Cursor = Cursors.Arrow; settings.Width = 44; settings.Height = 36; settings.Padding = new Thickness(4, 0, 4, 0); settings.Margin = new Thickness(2, 0, 2, 0); settings.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(settings, 2); expanded.Children.Add(settings);
         Root.Children.Add(new Border { Child = expanded, CornerRadius = new CornerRadius(27), Background = Brushes.Transparent });
-        var orbStack = new Grid(); orbStroke = new System.Windows.Shapes.Path { Stroke=Ui.Line,StrokeThickness=1,IsHitTestVisible=false, Margin = new Thickness(.5) };
-        orbStack.Children.Add(orbStroke); orbStack.Children.Add(Brand.OrbGlyph());
-        badge = new TextBlock { Text = "", FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Ui.Text, TextWrapping = TextWrapping.NoWrap };
+        var orbStack = new Grid(); orbStroke = new System.Windows.Shapes.Path { StrokeThickness=1,IsHitTestVisible=false, Margin = new Thickness(.5) };
+        Ui.BindBrush(orbStroke, System.Windows.Shapes.Shape.StrokeProperty, "LineBrush", Ui.Line);
+        orbStack.Children.Add(Brand.OrbGlyph()); orbStack.Children.Add(orbStroke);
+        badge = new TextBlock { Text = "", FontSize = 10, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.NoWrap };
+        Ui.BindBrush(badge, TextBlock.ForegroundProperty, "TextBrush", Ui.Text);
         countBubble = new Border { Width = 18, Height = 18, CornerRadius = new CornerRadius(9), Padding = new Thickness(2),
-            Background = Ui.Brush("#334258"), BorderBrush = Ui.Brush("#F28F98"), BorderThickness = new Thickness(1),
+            Background = ThemePalette.Current.CountBubbleBackground, BorderBrush = Ui.Danger, BorderThickness = new Thickness(1.3),
             HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 4, 8, 0),
             Visibility = Visibility.Collapsed, IsHitTestVisible = false,
             Child = new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = badge } };
@@ -109,7 +136,8 @@ internal sealed partial class BallSurface : SurfaceWindow
             else { HidePopups(); controller.OrbMenu(orb); } e.Handled = true;
             ResetEdgeIdle();
         };
-        resultItems.Background = Brushes.Transparent; resultItems.BorderThickness = new Thickness(0); resultItems.Foreground = Ui.Text;
+        resultItems.Background = Brushes.Transparent; resultItems.BorderThickness = new Thickness(0);
+        Ui.BindBrush(resultItems, Control.ForegroundProperty, "TextBrush", Ui.Text);
         resultItems.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         VirtualizingPanel.SetIsVirtualizing(resultItems, true); VirtualizingPanel.SetVirtualizationMode(resultItems, VirtualizationMode.Recycling);
         ScrollViewer.SetHorizontalScrollBarVisibility(resultItems, ScrollBarVisibility.Disabled);
@@ -141,19 +169,64 @@ internal sealed partial class BallSurface : SurfaceWindow
     internal void PrepareExpandedVisuals(bool expandedState)
     {
         capsuleFill.Visibility = Visibility.Visible; orbFill.Visibility = Visibility.Collapsed;
-        if (expandedState) { expanded.Visibility = Visibility.Visible; expanded.Opacity = 1; }
+        if (expandedState)
+        {
+            if (expanded.Visibility != Visibility.Visible) expanded.Opacity = 0;
+            expanded.Visibility = Visibility.Visible;
+        }
+    }
+    internal void HideCompletely()
+    {
+        edgeIdle.Stop();
+        StopEdgeMotion();
+        CancelBallReveal();
+        IsEdgeHidden = false;
+        edgeMenuOpen = false;
+        placementPending = false;
+        CurrentCapsuleWidth = 58;
+        expanded.Opacity = 0;
+        expanded.Visibility = Visibility.Collapsed;
+        capsuleFill.Visibility = Visibility.Collapsed;
+        orbFill.Visibility = Visibility.Visible;
+        HidePopups();
+        Hide();
     }
     public void SetExpanded(bool expandedState)
     {
+        if (!IsBallEnabled)
+        {
+            HideCompletely();
+            return;
+        }
         RestoreFromEdge(); ResetEdgeIdle();
         HidePopups();
         PreparePlacement();
-        var orbLeft = VisibleBallLeft;
-        if (!expandedState && Width <= 58 && !HasActiveMotion) { expanded.Visibility = Visibility.Collapsed; capsuleFill.Visibility=Visibility.Collapsed; orbFill.Visibility=Visibility.Visible; return; }
+        if (!expandedState && Width <= 58 && CurrentCapsuleWidth <= 58 && !HasActiveMotion)
+        {
+            CurrentCapsuleWidth = 58;
+            expanded.Opacity = 0;
+            expanded.Visibility = Visibility.Collapsed;
+            capsuleFill.Visibility = Visibility.Collapsed;
+            orbFill.Visibility = Visibility.Visible;
+            UpdateGlassGeometry();
+            return;
+        }
         RevealBall(expandedState, expandLeft, () => PrepareExpandedVisuals(expandedState), () =>
         {
-            if (!expandedState) { Width = 58; Left = orbLeft; expanded.Visibility = Visibility.Collapsed; }
-            capsuleFill.Visibility = expandedState ? Visibility.Visible : Visibility.Collapsed; orbFill.Visibility = expandedState ? Visibility.Collapsed : Visibility.Visible;
+            if (!expandedState)
+            {
+                CurrentCapsuleWidth = 58;
+                expanded.Opacity = 0;
+                expanded.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                CurrentCapsuleWidth = ExpandedWidth;
+                expanded.Opacity = 1;
+                expanded.Visibility = Visibility.Visible;
+            }
+            capsuleFill.Visibility = expandedState ? Visibility.Visible : Visibility.Collapsed;
+            orbFill.Visibility = expandedState ? Visibility.Collapsed : Visibility.Visible;
             UpdateBadge();
             if (placementPending) Dispatcher.BeginInvoke(new Action(() => PreparePlacement()));
         });
@@ -197,13 +270,22 @@ internal sealed partial class BallSurface : SurfaceWindow
     internal IInputElement? HitTestOrb(Point point) => ContainsOrbPoint(point) && (!IsEdgeHidden || EdgeVisibleClip.Contains(point))
         ? Root.InputHitTest(new Point(point.X + (expandLeft ? 370 - Width : 0), point.Y)) : null;
     internal Point OrbPointToScreen(Point point) => Root.PointToScreen(new Point(point.X + (expandLeft ? 370 - Width : 0), point.Y));
-    internal Geometry CanvasClip => BallGeometry(370, Height, IsEdgeDocked && !dockLeft, DockedLeft);
-    internal static Geometry BallGeometry(double width, double height, bool flatRight, bool flatLeft = false)
+    internal Geometry CanvasClip
+    {
+        get
+        {
+            var visible = Math.Clamp(CurrentCapsuleWidth, 58, 370);
+            var offsetX = expandLeft ? 370 - visible : 0;
+            return BallGeometry(visible, Height, IsEdgeDocked && !dockLeft, DockedLeft, offsetX);
+        }
+    }
+    internal static Geometry BallGeometry(double width, double height, bool flatRight, bool flatLeft = false, double offsetX = 0)
     {
         var radius = height / 2;
         return flatRight || flatLeft ? new CombinedGeometry(GeometryCombineMode.Intersect,
-            new RectangleGeometry(new Rect(flatLeft ? -radius : 0, 0, width + radius, height), radius, radius),
-            new RectangleGeometry(new Rect(0, 0, width, height))) : new RectangleGeometry(new Rect(0, 0, width, height), radius, radius);
+            new RectangleGeometry(new Rect(offsetX + (flatLeft ? -radius : 0), 0, width + radius, height), radius, radius),
+            new RectangleGeometry(new Rect(offsetX, 0, width, height)))
+            : new RectangleGeometry(new Rect(offsetX, 0, width, height), radius, radius);
     }
     public void UpdateBadge()
     {

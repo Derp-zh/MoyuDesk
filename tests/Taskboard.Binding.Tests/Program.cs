@@ -11,6 +11,7 @@ if (args.Contains("--native-read-only")) return await NativeTargetChecks.Run(out
 if (args.Contains("--batch1-ui")) return Batch1UiChecks.Run(output);
 if (args.Contains("--batch2-ui")) return Batch2UiChecks.Run(output);
 if (args.Contains("--batch3-surface")) return Batch3SurfaceChecks.Run(output);
+if (args.Contains("--profile-20")) return Batch3SurfaceChecks.RunProfile20(output);
 var checks = new List<object>();
 foreach (var mode in new[] { "still", "move5", "move200", "submenu", "duplicate", "preexisting-menu", "clipboard-before",
     "foreign-copy", "invalid-link", "invoke-acts-then-throws", "cancel-before-open", "cancel-on-open", "cancel-after-copy",

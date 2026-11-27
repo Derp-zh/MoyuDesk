@@ -22,6 +22,7 @@ public sealed class ConfigurationBackup
         var result = new ConfigurationBackup { DataDirectory = Path.GetFullPath(directory), PersistenceRevision = state.PersistenceRevision, Preferences = Copies.Of(state.Preferences),
             AiOptions = Copies.Of(state.AiOptions), PriorityOptions = Copies.Of(state.PriorityOptions) };
         foreach (var key in result.Preferences.Positions.Keys.Where(x => x.StartsWith("edit-", StringComparison.Ordinal)).ToArray()) result.Preferences.Positions.Remove(key);
+        result.Preferences.ExpandedStageDetails.Clear();
         return result;
     }
     public static ConfigurationBackup Read(string file)
@@ -46,11 +47,13 @@ public sealed class ConfigurationBackup
         if (Format != "taskboard-configuration" || Version != 1 || string.IsNullOrWhiteSpace(DataDirectory) || Preferences is null || AiOptions is null || PriorityOptions is null)
             throw new InvalidDataException("不是有效的任务面板配置备份（不能导入任务备份）");
         _ = Path.GetFullPath(DataDirectory);
+        Validation.Normalize(Preferences);
         Validation.Check(new BoardState { Preferences = Preferences, AiOptions = AiOptions, PriorityOptions = PriorityOptions });
     }
     public BoardState Apply(BoardState state)
     {
         Check(); var candidate = Copies.Of(state); candidate.Preferences = Copies.Of(Preferences);
+        candidate.Preferences.ExpandedStageDetails = [.. state.Preferences.ExpandedStageDetails];
         // Preserve all task references exactly. Referenced old definitions survive
         // alongside restored definitions; importing configuration never edits tasks.
         var items = state.Tasks.Concat(state.Sessions.SelectMany(x => new[] { x.Working, x.Original })).ToArray();
@@ -62,7 +65,7 @@ public sealed class ConfigurationBackup
         var references = items.Concat(state.Archives.Select(x => x.Item)).ToArray();
         candidate.AiOptions = Merge(AiOptions, state.AiOptions, references.SelectMany(x => x.AiIds).ToHashSet());
         candidate.PriorityOptions = Merge(PriorityOptions, state.PriorityOptions, references.Where(x => x.PriorityId is not null).Select(x => x.PriorityId!.Value).ToHashSet());
-        OptionPalette.Upgrade(candidate); Validation.Check(candidate); return candidate;
+        OptionPalette.Upgrade(candidate); Validation.Normalize(candidate); Validation.Check(candidate); return candidate;
     }
     private static List<FieldOption> Merge(List<FieldOption> restored, List<FieldOption> current, HashSet<Guid> referenced)
     {

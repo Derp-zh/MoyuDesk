@@ -27,7 +27,8 @@ internal sealed class OnboardingSurface : SurfaceWindow
         Root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Root.RowDefinitions.Add(new RowDefinition()); Root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var top = new DockPanel { Margin = new Thickness(16, 10, 12, 4), Background = Brushes.Transparent };
         var close = Ui.Button("×", Destroy); close.Tag = "TutorialClose"; close.Width = 48; close.Height = 40; close.Padding = new Thickness(0);
-        close.Style = (Style)Application.Current.FindResource("EditorCloseButton"); close.Background = Ui.Brush("#C04B5B70"); close.BorderBrush = close.Foreground = Brushes.White;
+        if (Application.Current?.TryFindResource("EditorCloseButton") is Style closeStyle) close.Style = closeStyle;
+        else { close.Background = Ui.CloseButtonSurface; close.BorderBrush = Ui.CloseButtonBorder; close.Foreground = Ui.CloseButtonText; }
         DockPanel.SetDock(close, Dock.Right); top.Children.Add(close); top.Children.Add(Ui.Label("欢迎使用" + Brand.Name, 16)); Root.Children.Add(top); MoveWith(top);
         var body = new StackPanel { Margin = new Thickness(20, 2, 20, 8) }; progress.Tag = "TutorialProgress"; heading.Tag = "TutorialHeading"; body.Children.Add(progress); body.Children.Add(heading);
         description.LineHeight = 25; description.Margin = new Thickness(0, 8, 0, 12); body.Children.Add(description); action = Ui.Button("", () => steps[index].Run()); action.Tag = "TutorialAction"; action.HorizontalAlignment = HorizontalAlignment.Left; body.Children.Add(action);

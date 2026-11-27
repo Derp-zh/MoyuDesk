@@ -30,7 +30,7 @@ internal sealed partial class SettingsSurface
         days.Margin = new Thickness(8, 0, 8, 0); days.Padding = new Thickness(9, 5, 9, 5); days.MinHeight = 30;
         System.Windows.Automation.AutomationProperties.SetName(days, "自动归档天数"); daysRow.Children.Add(days);
         var suffix = Ui.Label("天自动归档", 12); suffix.VerticalAlignment = VerticalAlignment.Center; daysRow.Children.Add(suffix); policy.Children.Add(daysRow);
-        var error = Ui.Label("", 11, Ui.Brush("#F28F98")); error.Tag = "ArchiveDaysError"; error.Visibility = Visibility.Collapsed;
+        var error = Ui.Label("", 11, Ui.Danger); error.Tag = "ArchiveDaysError"; error.Visibility = Visibility.Collapsed;
         error.Margin = new Thickness(22, 6, 0, 0); policy.Children.Add(error);
         async void ApplyDays()
         {
@@ -80,10 +80,10 @@ internal sealed partial class SettingsSurface
             metadata.ToolTip = "归档时间与原列表：" + metadata.Text; footer.Children.Add(metadata);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
             var restore = Ui.Button("取消归档", () => controller.UnarchiveTask(archived.Item.Id));
-            restore.Tag = "RestoreArchivedTask"; restore.Height = 28; restore.Padding = new Thickness(10, 2, 10, 2); actions.Children.Add(restore);
+            restore.Tag = "RestoreArchivedTask"; restore.Height = 30; restore.Padding = new Thickness(11, 4, 11, 4); actions.Children.Add(restore);
             var remove = Ui.Button("×", async () => await controller.DeleteArchivedTask(archived.Item.Id));
-            remove.Tag = "DeleteArchivedTask"; remove.Width = remove.Height = 24; remove.Padding = new Thickness(0); remove.ToolTip = "永久删除归档任务";
-            remove.Foreground = Ui.Brush("#F28F98"); actions.Children.Add(remove); Grid.SetColumn(actions, 1); footer.Children.Add(actions); entry.Children.Add(footer);
+            remove.Tag = "DeleteArchivedTask"; remove.Width = remove.Height = 26; remove.Padding = new Thickness(0); remove.ToolTip = "永久删除归档任务";
+            remove.Foreground = Ui.Danger; Ui.ApplyCircularStyle(remove); actions.Children.Add(remove); Grid.SetColumn(actions, 1); footer.Children.Add(actions); entry.Children.Add(footer);
             var frame = SettingsCard(entry); frame.Tag = "ArchiveTaskEntry"; frame.DataContext = archived;
             panel.Children.Add(frame);
         }

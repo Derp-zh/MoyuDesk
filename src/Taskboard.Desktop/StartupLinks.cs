@@ -11,9 +11,22 @@ using Microsoft.Win32;
 
 namespace Taskboard.Desktop;
 
+internal enum AutoStartHealth
+{
+    Disabled,
+    Healthy,
+    PathMissing,
+    WindowsDisabled,
+    PathChanged
+}
+
+internal sealed record AutoStartDiagnostic(AutoStartHealth Health, string Summary, string? ActionHint = null);
+
 internal static class StartupLinks
 {
     private const string Entry = "TaskboardPortable";
+    internal static string FixedInstallDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MoyuDesk", "app");
     private static string CatalogFile => Path.Combine(DataPaths.SystemRoot, "installations.json");
     internal static string? ExistingInstallation()
     {
@@ -78,16 +91,43 @@ internal static class StartupLinks
         var value = key?.GetValue(Entry) as string;
         return value is not null && !string.Equals(ExecutableFromCommand(value), LatestExecutable(), StringComparison.OrdinalIgnoreCase);
     }
-    internal static string AutoStartStatus()
+    internal static bool IsStartupApprovedDisabled(byte[]? bytes) =>
+        bytes is { Length: > 0 } && (bytes[0] is 3 or 7 || (bytes[0] & 1) == 1);
+
+    internal static AutoStartDiagnostic DiagnoseAutoStart(string? runCommand, bool executableExists, byte[]? startupApprovedBytes, string? latestExecutable)
+    {
+        if (string.IsNullOrWhiteSpace(runCommand))
+            return new AutoStartDiagnostic(AutoStartHealth.Disabled, "开机自启已关闭");
+        var exe = ExecutableFromCommand(runCommand);
+        if (string.IsNullOrWhiteSpace(exe) || !executableExists)
+            return new AutoStartDiagnostic(AutoStartHealth.PathMissing,
+                "自启路径失效（原程序目录可能已移动或删除），请点击“修复开机启动路径”",
+                "建议通过“安装或升级摸鱼台.cmd”安装到固定目录，避免换版本后自启失效。");
+        if (IsStartupApprovedDisabled(startupApprovedBytes))
+            return new AutoStartDiagnostic(AutoStartHealth.WindowsDisabled,
+                "Windows“启动应用”中已禁用摸鱼台，导致开机不会自动启动！请点击下方按钮打开系统设置手动重新启用。",
+                "打开“Windows 启动应用设置” -> 找到“TaskboardPortable / 摸鱼台” -> 开启开关。");
+        if (!string.IsNullOrWhiteSpace(latestExecutable) && !string.Equals(exe, latestExecutable, StringComparison.OrdinalIgnoreCase))
+            return new AutoStartDiagnostic(AutoStartHealth.PathChanged,
+                "自启路径仍指向旧文件夹，建议点击“修复开机启动路径”更新到当前最新版本。",
+                null);
+        return new AutoStartDiagnostic(AutoStartHealth.Healthy, "自启入口有效 · 已指向最新登记版本");
+    }
+
+    internal static AutoStartDiagnostic DiagnoseAutoStart()
     {
         using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        if (run?.GetValue(Entry) is not string command) return "开机自启已关闭";
-        if (!File.Exists(ExecutableFromCommand(command))) return "自启路径失效，请修复启动入口";
-        // Read-only diagnostic for Task Manager's implementation-specific flag.
+        var command = run?.GetValue(Entry) as string;
+        var exe = ExecutableFromCommand(command);
+        var exists = !string.IsNullOrWhiteSpace(exe) && File.Exists(exe);
         using var approval = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
-        if (approval?.GetValue(Entry) is byte[] bytes && bytes.Length > 0 && bytes[0] is 3 or 7) return "Windows启动应用中已禁用此入口，请在系统设置启用";
-        return "自启入口有效 · 已登记版本中的最新版";
+        var approvedBytes = approval?.GetValue(Entry) as byte[];
+        string? latest = null;
+        try { latest = LatestExecutable(); } catch { }
+        return DiagnoseAutoStart(command, exists, approvedBytes, latest);
     }
+
+    internal static string AutoStartStatus() => DiagnoseAutoStart().Summary;
     internal static void VerifyAndUpdateExistingEntry(string directory)
     {
         Directory.CreateDirectory(directory);

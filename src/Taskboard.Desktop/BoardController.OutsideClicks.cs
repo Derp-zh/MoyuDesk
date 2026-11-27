@@ -118,13 +118,34 @@ internal sealed partial class BoardController
         private IntPtr Pressed(int code, IntPtr message, IntPtr data)
         {
             // Never block, suppress or store other applications' clicks.
-            if (code >= 0 && !disposed && message.ToInt64() is 0x0201 or 0x0204 or 0x0207)
+            // Exception: when hovering over a pinned click-through Action column
+            // that actually has vertical overflow, intercept WM_MOUSEWHEEL so
+            // the user can scroll the pinned list without scrolling the app underneath.
+            if (code >= 0 && !disposed)
             {
-                // This thread only captures point and time. Never
-                // wait for WPF/layout/persistence: Windows removes a slow
-                // low-level hook silently, permanently losing outside clicks.
-                var mouse = Marshal.PtrToStructure<MouseData>(data);
-                CapturePress(mouse.Point, mouse.Time, message.ToInt64() == 0x0201 ? 0 : message.ToInt64() == 0x0204 ? 1 : 2, 1);
+                var msg = message.ToInt64();
+                if (msg == 0x020A)
+                {
+                    var mouse = Marshal.PtrToStructure<MouseData>(data);
+                    var wheelDelta = (short)((mouse.Buttons >> 16) & 0xFFFF);
+                    if (wheelDelta != 0 && !HasScrollModifierPressed() && controller.TryInterceptPinnedWheel(mouse.Point.X, mouse.Point.Y, wheelDelta,
+                        delta =>
+                        {
+                            if (!ui.HasShutdownStarted)
+                                _ = ui.BeginInvoke(new Action(() => controller.ScrollPinnedActionColumn(delta)), DispatcherPriority.Normal);
+                        }))
+                    {
+                        return new IntPtr(1);
+                    }
+                }
+                else if (msg is 0x0201 or 0x0204 or 0x0207)
+                {
+                    // This thread only captures point and time. Never
+                    // wait for WPF/layout/persistence: Windows removes a slow
+                    // low-level hook silently, permanently losing outside clicks.
+                    var mouse = Marshal.PtrToStructure<MouseData>(data);
+                    CapturePress(mouse.Point, mouse.Time, msg == 0x0201 ? 0 : msg == 0x0204 ? 1 : 2, 1);
+                }
             }
             return CallNextHookEx(hook, code, message, data);
         }
@@ -194,6 +215,9 @@ internal sealed partial class BoardController
         [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int id, MouseHook callback, IntPtr module, uint thread);
         [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
         [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+        private static bool HasScrollModifierPressed() =>
+            (GetAsyncKeyState(0x10) & 0x8000) != 0 || (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0;
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(PixelPoint point);
         [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
     }

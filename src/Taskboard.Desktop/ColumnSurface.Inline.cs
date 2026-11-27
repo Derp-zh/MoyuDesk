@@ -18,10 +18,10 @@ internal sealed partial class ColumnSurface
         if (finishInline is not null) return;
         var session = controller.Engine.State.Sessions.FirstOrDefault(x => x.Inline) ?? controller.Engine.NewSession(Lane.Inspiration, true);
         var panel = new StackPanel(); var card = new Border { Child = panel, Tag = "QuickTaskEntry" }; TaskCardLayout.Frame(card);
-        var title = Input(session.Working.Title, false); title.FontWeight = FontWeights.SemiBold; title.Foreground = Ui.Accent;
+        var title = Input(session.Working.Title, false); title.FontWeight = FontWeights.SemiBold; Ui.BindBrush(title, Control.ForegroundProperty, "AccentBrush", Ui.Accent);
         var detail = Input(session.Working.Stages[0].Text, true); detail.FontSize = 14; detail.MinLines = 2; detail.MinHeight = 46; detail.MaxHeight = 80; detail.Padding = new Thickness(7, 4, 24, 4);
         detail.IsKeyboardFocusWithinChanged += (_, _) => detail.MaxHeight = detail.IsKeyboardFocusWithin ? double.PositiveInfinity : 80;
-        detail.BorderBrush = Ui.Line; detail.BorderThickness = new Thickness(1); RoundedInput.SetRadius(detail, 10);
+        Ui.BindBrush(detail, Control.BorderBrushProperty, "LineBrush", Ui.Line); detail.BorderThickness = new Thickness(1); RoundedInput.SetRadius(detail, 10);
         var timer = inlineTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         Guid? saved = null; var dirty = session.Working.HasContent; var ended = false; var saving = false;
         var titleRow = new Grid(); titleRow.ColumnDefinitions.Add(new ColumnDefinition()); titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

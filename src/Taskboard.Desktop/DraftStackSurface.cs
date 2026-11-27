@@ -156,6 +156,13 @@ internal sealed class DraftStackSurface : SurfaceWindow
     }
     internal override IEnumerable<GlassRegion> GlassRegions() => regions;
     protected override void ApplyGlassTint() => Root.Background = Ui.Brush("#01000000");
+    public override void ApplyTheme()
+    {
+        foreach (var child in canvas.Children.OfType<Border>()) Ui.BindBrush(child, Border.BorderBrushProperty, "LineBrush", Ui.Line);
+        foreach (var rect in canvas.Children.OfType<Rectangle>()) Ui.BindBrush(rect, Shape.StrokeProperty, "MutedBrush", Ui.Muted);
+        foreach (var view in switchViews) view.ApplyTheme();
+        base.ApplyTheme();
+    }
     public override void RefreshGlass() { foreach (var tint in tints) tint.Background = GlassTintBrush; base.RefreshGlass(); }
     public void ClearClosed()
     {

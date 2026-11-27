@@ -52,8 +52,10 @@ internal sealed partial class SettingsSurface
             button.VerticalAlignment = VerticalAlignment.Center; button.ToolTip = "查看图解：" + HelpTopics[key].Title;
             System.Windows.Automation.AutomationProperties.SetName(button, "图解帮助：" + HelpTopics[key].Title);
             var chrome = new FrameworkElementFactory(typeof(Border)); chrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(11));
-            chrome.SetValue(Border.BackgroundProperty, Ui.Brush("#01192333"));
-            chrome.SetValue(Border.BorderThicknessProperty, new Thickness(1)); chrome.SetValue(Border.BorderBrushProperty, Ui.Muted);
+            chrome.SetValue(Border.BackgroundProperty, Ui.HitSurface);
+            chrome.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+            if (Application.Current?.TryFindResource("MutedBrush") is Brush) chrome.SetResourceReference(Border.BorderBrushProperty, "MutedBrush");
+            else chrome.SetValue(Border.BorderBrushProperty, Ui.Muted);
             var presenter = new FrameworkElementFactory(typeof(ContentPresenter)); presenter.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center); presenter.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
             chrome.AppendChild(presenter); button.Template = new ControlTemplate(typeof(Button)) { VisualTree = chrome };
             DockPanel.SetDock(button, Dock.Right); content.Children.Add(button);

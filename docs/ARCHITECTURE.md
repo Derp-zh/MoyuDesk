@@ -1,6 +1,6 @@
 # 代码架构与编译测试说明
 
-源码版本：`0.9.52`，目标框架：`net8.0-windows10.0.19041.0`（WPF + WinForms + Direct2D/D3D11 + UIAutomation）。
+源码版本：`0.9.56`，目标框架：`net8.0-windows10.0.19041.0`（WPF + WinForms + Direct2D/D3D11 + UIAutomation）。
 
 ## 1. 模块划分
 
@@ -13,15 +13,15 @@
 | `Core/Persistence` | `AtomicStore`、`ConfigurationBackup`、`StartupCatalog`：原子写入、备份与启动目录管理 |
 | `Core/AiState` | `CodexState`、`AiState`、`AiAttention`：会话轮次与等待状态保护、多阶段聚合、恢复清点 |
 | `Core/Notifications` | `ReminderClock`、`NotificationListening`：定时提醒与通知监听核心状态 |
-| `Desktop/Application` | `Program`、`DataPaths`、`StartupLinks`、`DeviceOnboarding`、`Brand`：启动入口、数据隔离、首次引导记录、单实例互斥 |
-| `Desktop/Workspace` | `BoardController`（各 partial含 `TaskSwitcher`）、`FocusLayout`、`ColumnSurface`、`OnboardingSurface`、`ImeWindowFilter`：主控制器、唯一 Alt+Tab 代理窗、六列窗口与专注模式布局、悬浮球、拖卡、快捷键、IME 免疫与外点/全屏输入协调 |
+| `Desktop/Application` | `Program`、`DataPaths`、`StartupLinks`、`AppUpdater`、`DeviceOnboarding`、`Brand`：启动入口（含 `--startup` 容错重试）、开机自启诊断、GitHub Releases 零服务器检查/SHA256校验升级、数据隔离、首次引导记录、单实例互斥 |
+| `Desktop/Workspace` | `BoardController`（各 partial 含 `TaskSwitcher` 前景收起控制、`PinnedAction`）、`FocusLayout`、`ColumnSurface`、`OnboardingSurface`、`ImeWindowFilter`：主控制器、零任务栏窗口约束与前景切离自动收起、待操作列常驻鼠标穿透及同步迷你解除浮窗、六列窗口与专注模式布局、悬浮球、拖卡、快捷键、IME 免疫与外点/全屏输入协调 |
 | `Desktop/Editing` | `EditorSurface`、`ReminderEditor`、`StageDetailsEditor`、`StageReorderGesture`、`DraftStackSurface`：新建/编辑窗口、提醒选择器、阶段拖动排序、多草稿堆叠与动画 |
 | `Desktop/Binding` | `StageConversationPicker`、`ConversationNavigator`、`ConversationJumpButton`：会话选择/绑定窗、跨应用拖动绑定、一键跳转至原会话 |
-| `Desktop/Settings` | `SettingsSurface`、`SettingsHelp`：设置界面、真实截图帮助、平台初始化与连接状态 |
+| `Desktop/Settings` | `SettingsSurface`、`SettingsHelp`：设置界面（含“外观”深浅色/配色页）、真实截图帮助、平台初始化与连接状态 |
 | `Desktop/Codex` | `CodexObserver`、`CodexBehaviorSource`、`SidebarSource`、`LocalCatalog`：Codex 本机 SQLite 目录、后台行为日志与前台只读 UIA 控件观察 |
 | `Desktop/AiPlatforms` | `AiPlatformObserver`、`AiPlatformSetup`、`DshConversationTarget`、`ClaudeDesktopCatalog`：DSH 原生 v4 日志监听、Claude Hook 与桌面稳定会话 ID 映射 |
 | `Desktop/Notifications` | `NotificationCapture`、`ListeningService`、`Audio`、`SoundLease`：Windows 通知捕获、自定义提示音与原系统声音恢复 |
-| `Desktop/Rendering` | `SurfaceWindow`、`LiveBackdrop`、`AdaptiveCardPanel`、`ColorPickerPanel`、`Ui`：透明毛玻璃背景、帧动画、虚拟多列卡片布局与颜色选择器 |
+| `Desktop/Rendering` | `ThemePalette`、`SurfaceWindow`、`LiveBackdrop`、`AdaptiveCardPanel`、`ColorPickerPanel`、`ActionPinIcon`、`OrbMenuRenderer`、`Ui`：全局深浅色/9套多配色实时主题引擎、透明毛玻璃背景、帧动画、虚拟多列卡片布局、原创图钉图标与高对比圆角控件体系 |
 
 修改共享表面（背景、透明度、命中测试、动画、输入）前，请先阅读 [SHARED-CODE.md](architecture/SHARED-CODE.md) 与 [VERIFICATION.md](architecture/VERIFICATION.md)。
 

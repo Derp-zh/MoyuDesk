@@ -37,13 +37,24 @@ internal sealed partial class BoardController
     }
     internal void ToggleFromHotkey()
     {
-        if (Expanded) { SetExpanded(false); return; }
+        if (Expanded)
+        {
+            if (ActionPinned) ActionPinnedHiddenByHotkey = true;
+            SetExpanded(false);
+            return;
+        }
+        ActionPinnedHiddenByHotkey = false;
         appWasForeground = true;
         SuppressForegroundCollapse(400);
         SetExpanded(true);
+        if (OffscreenNoShow) return;
         foreach (var column in VisibleColumns) Native.Raise(column);
         foreach (var window in FloatingWindows().Where(x => x.ShouldRestore).OrderBy(x => x.ActivationOrder)) Native.Raise(window);
-        var target = DismissibleWindow() ?? (SurfaceWindow?)VisibleColumns.FirstOrDefault() ?? Ball;
-        target.Activate(); Native.RaiseBall();
+        var target = DismissibleWindow()
+            ?? (SurfaceWindow?)VisibleColumns.FirstOrDefault(x => !x.IsPinnedOverlay)
+            ?? Ball;
+        target.Activate();
+        SyncActionPinOverlay();
+        Native.RaiseBall();
     }
 }

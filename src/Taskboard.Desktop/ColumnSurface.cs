@@ -14,10 +14,23 @@ namespace Taskboard.Desktop;
 internal sealed partial class ColumnSurface : SurfaceWindow
 {
     protected override bool ScrollEnabled => false;
-    internal override double GlassTransparency => Transparency;
+    internal override double GlassTransparency => IsPinnedOverlay ? controller.Engine.State.Preferences.PinnedActionTransparency : Transparency;
+    internal bool IsPinnedOverlay { get; private set; }
+    internal event Action? PinnedOverlayGeometryChanged;
+    internal event Action? PinnedScrollabilityChanged;
+    private bool? lastReportedScrollable;
     // A layered child needs nonzero alpha over its entire existing input area.
     // The visible tint remains in the persistent compositor layer.
-    protected override void ApplyGlassTint() => Root.Background = Ui.Brush("#01192333");
+    protected override void ApplyGlassTint() => Root.Background = Ui.HitSurface;
+    public override void ApplyTheme()
+    {
+        Ui.BindBrush(codexConnectionHint, TextBlock.ForegroundProperty, "MutedBrush", Ui.Muted);
+        RefreshPinToggleAppearance();
+        if (completedToggle is not null) Ui.BindBrush(completedToggle, Control.ForegroundProperty, "AccentBrush", Ui.Accent);
+        base.ApplyTheme();
+        if (!QuickEntryActive) ResetFooter();
+        Repaint();
+    }
     private readonly BoardController controller;
     public BoardColumn Definition { get; private set; }
     public Lane Lane => Definition.BuiltinLane ?? Lane.Refining;
@@ -92,27 +105,36 @@ internal sealed partial class ColumnSurface : SurfaceWindow
                 new System.Windows.Data.Binding(nameof(ContentControl.Content)) { RelativeSource = System.Windows.Data.RelativeSource.TemplatedParent });
             contents.SetValue(HorizontalAlignmentProperty, HorizontalAlignment.Center); contents.SetValue(VerticalAlignmentProperty, VerticalAlignment.Center);
             chrome.AppendChild(contents); var quickTemplate = new ControlTemplate(typeof(Button)) { VisualTree = chrome };
+            var useDynamic = Application.Current?.TryFindResource("AccentBrush") is Brush;
             var hover = new Trigger { Property = Button.IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BorderBrushProperty, Ui.Accent, "QuickAiCapsuleChrome")); quickTemplate.Triggers.Add(hover);
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty, useDynamic ? new DynamicResourceExtension("AccentBrush") : (object)Ui.Accent, "QuickAiCapsuleChrome"));
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, useDynamic ? new DynamicResourceExtension("ButtonHoverBrush") : (object)Ui.ButtonHover, "QuickAiCapsuleChrome")); quickTemplate.Triggers.Add(hover);
             var pressed = new Trigger { Property = Button.IsPressedProperty, Value = true };
-            pressed.Setters.Add(new Setter(OpacityProperty, .7, "QuickAiCapsuleChrome")); quickTemplate.Triggers.Add(pressed);
+            pressed.Setters.Add(new Setter(Border.BackgroundProperty, useDynamic ? new DynamicResourceExtension("ButtonPressedBrush") : (object)Ui.ButtonPressed, "QuickAiCapsuleChrome")); quickTemplate.Triggers.Add(pressed);
             var disabled = new Trigger { Property = Button.IsEnabledProperty, Value = false };
             disabled.Setters.Add(new Setter(OpacityProperty, .45, "QuickAiCapsuleChrome")); quickTemplate.Triggers.Add(disabled);
             quick.Template = quickTemplate;
             quick.Padding = new Thickness(0); quick.Margin = new Thickness(6, 0, 5, 0); quick.VerticalAlignment = VerticalAlignment.Center;
             quick.ToolTip = "按住拖到会话：用会话名称新建任务并绑定";
             var icon = new Grid { Width = 26, Height = 22, IsHitTestVisible = false };
-            icon.Children.Add(new System.Windows.Shapes.Path { Data = Geometry.Parse("M 4,13 L 16,13 M 10,7 L 10,19"), Stroke = Ui.Accent, StrokeThickness = 1.8 });
-            icon.Children.Add(new TextBlock { Text = "AI", FontSize = 8, Foreground = Ui.Accent, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top });
+            var plusPath = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 4,13 L 16,13 M 10,7 L 10,19"), StrokeThickness = 1.8 };
+            Ui.BindBrush(plusPath, System.Windows.Shapes.Shape.StrokeProperty, "AccentBrush", Ui.Accent);
+            icon.Children.Add(plusPath);
+            var aiTag = new TextBlock { Text = "AI", FontSize = 8, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
+            Ui.BindBrush(aiTag, TextBlock.ForegroundProperty, "AccentBrush", Ui.Accent);
+            icon.Children.Add(aiTag);
             quick.Content = icon;
             var gesture = new ConversationCapsuleGesture(quick, controller, () => new ConversationBindingDrag(controller, this),
                 () => Ui.Hint(quick, "按住并拖到绑定窗口中的会话，或 Codex / DSH 会话", !controller.Smoke));
             quick.Unloaded += (_, _) => gesture.Dispose(); Grid.SetColumn(quick, 1); area.Children.Add(quick); header.Children.Add(area);
         }
-        AddCompletedToggle(header);
+        var rightSlot = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right };
+        AddCompletedToggle(rightSlot);
+        AddPinToggle(rightSlot);
         count = Ui.Label("0", 12, Ui.Muted); count.VerticalAlignment = VerticalAlignment.Center; count.HorizontalAlignment = HorizontalAlignment.Right;
         count.Margin = new Thickness(0, 2.4, 0, 2.4);
-        Grid.SetColumn(count, 1); header.Children.Add(count); Root.Children.Add(header); MoveWith(header);
+        rightSlot.Children.Add(count);
+        Grid.SetColumn(rightSlot, 1); header.Children.Add(rightSlot); Root.Children.Add(header); MoveWith(header);
         list = new ListBox { ItemsSource = items, Background = Brushes.Transparent, BorderThickness = new Thickness(0),
             Padding = new Thickness(10, 0, 10, 0), HorizontalContentAlignment = HorizontalAlignment.Stretch, AllowDrop = true };
         VirtualizingPanel.SetIsVirtualizing(list, true); VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling);
@@ -176,12 +198,15 @@ internal sealed partial class ColumnSurface : SurfaceWindow
         Root.ContextMenu = menu;
         Root.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) StopResize(); };
         Deactivated += (_, _) => { if (edgeResize) StopResize(); };
+        var useDynamicGrip = Application.Current?.TryFindResource("AccentBrush") is Brush;
         corner = new Thumb { Width = 18, Height = 18, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
             Cursor = Cursors.SizeNWSE, Background = Brushes.Transparent, Opacity = .9, Margin = new Thickness(6), Tag = "ColumnResizeGrip", ToolTip = "拖动调整本窗口大小" };
-        var cornerArea = new FrameworkElementFactory(typeof(Grid)); cornerArea.SetValue(Panel.BackgroundProperty, Ui.Brush("#01192333"));
+        var cornerArea = new FrameworkElementFactory(typeof(Grid)); cornerArea.SetValue(Panel.BackgroundProperty, Ui.HitSurface);
         var cornerGlyph = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path)); cornerGlyph.Name = "ColumnResizeGlyph";
         cornerGlyph.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 4,14 L 14,4 M 9,14 L 14,9 M 13,14 L 14,13"));
-        cornerGlyph.SetValue(System.Windows.Shapes.Shape.StrokeProperty, Ui.Accent); cornerGlyph.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1.6);
+        if (useDynamicGrip) cornerGlyph.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "AccentBrush");
+        else cornerGlyph.SetValue(System.Windows.Shapes.Shape.StrokeProperty, Ui.Accent);
+        cornerGlyph.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 1.6);
         cornerGlyph.SetValue(IsHitTestVisibleProperty, false); cornerArea.AppendChild(cornerGlyph);
         corner.Template = new ControlTemplate(typeof(Thumb)) { VisualTree = cornerArea };
         Grid.SetRowSpan(corner, 3); Root.Children.Add(corner);
@@ -192,11 +217,25 @@ internal sealed partial class ColumnSurface : SurfaceWindow
         Edge(HorizontalAlignment.Stretch, VerticalAlignment.Bottom, Cursors.SizeNS, e => Height = Math.Max(MinHeight, Height + e.VerticalChange));
         corner.DragDelta += (_, e) => { Width = Math.Max(MinWidth, Width + e.HorizontalChange); Height = Math.Max(MinHeight, Height + e.VerticalChange); };
         corner.DragCompleted += (_, _) => controller.SavePosition(Definition.PositionKey, this);
-        PositionChanged += () => controller.SavePosition(Definition.PositionKey, this);
+        PositionChanged += () => { controller.SavePosition(Definition.PositionKey, this); PinnedOverlayGeometryChanged?.Invoke(); };
+        LocationChanged += (_, _) => PinnedOverlayGeometryChanged?.Invoke();
+        SizeChanged += (_, _) => PinnedOverlayGeometryChanged?.Invoke();
+        DpiChanged += (_, _) => PinnedOverlayGeometryChanged?.Invoke();
+        IsVisibleChanged += (_, _) => PinnedOverlayGeometryChanged?.Invoke();
+        list.Loaded += (_, _) => { if (IsPinnedOverlay) NotifyPinnedScrollabilityIfChanged(force: true); };
+        list.SizeChanged += (_, _) => { if (IsPinnedOverlay) NotifyPinnedScrollabilityIfChanged(force: true); };
+        Root.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, e) =>
+        {
+            if (IsPinnedOverlay && (e.ExtentHeightChange != 0 || e.ViewportHeightChange != 0 || lastReportedScrollable is null))
+                NotifyPinnedScrollabilityIfChanged();
+        }));
         {
             group = new Thumb { Width = 22, Height = 22, Margin = new Thickness(6), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Cursor = Cursors.SizeNESW, ToolTip = "拖动：等比例调整最大范围；按住 Shift 拖动：整体平移最大范围" };
-            var glyph = new FrameworkElementFactory(typeof(TextBlock)); glyph.SetValue(TextBlock.TextProperty, "⤢"); glyph.SetValue(TextBlock.FontSizeProperty, 20.0); glyph.SetValue(TextBlock.ForegroundProperty, Ui.Accent); glyph.SetValue(TextBlock.BackgroundProperty, Brushes.Transparent);
-            var dragArea = new FrameworkElementFactory(typeof(Border)); dragArea.SetValue(Border.BackgroundProperty, Ui.Brush("#01192333")); dragArea.AppendChild(glyph);
+            var glyph = new FrameworkElementFactory(typeof(TextBlock)); glyph.SetValue(TextBlock.TextProperty, "⤢"); glyph.SetValue(TextBlock.FontSizeProperty, 20.0);
+            if (useDynamicGrip) glyph.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+            else glyph.SetValue(TextBlock.ForegroundProperty, Ui.Accent);
+            glyph.SetValue(TextBlock.BackgroundProperty, Brushes.Transparent);
+            var dragArea = new FrameworkElementFactory(typeof(Border)); dragArea.SetValue(Border.BackgroundProperty, Ui.HitSurface); dragArea.AppendChild(glyph);
             group.Template = new ControlTemplate(typeof(Thumb)) { VisualTree = dragArea }; group.Tag = "WorkspaceResizeGrip"; Grid.SetRowSpan(group, 3); Root.Children.Add(group);
             group.DragStarted += (_, _) => controller.BeginWorkspaceResize();
             group.DragDelta += (_, _) =>
@@ -241,6 +280,7 @@ internal sealed partial class ColumnSurface : SurfaceWindow
         }
         count.Text = edgeResize ? "调整中" : (desired.Length + (cardPreview is null ? 0 : 1) + (inlineTask is Guid id && controller.Engine.State.Tasks.Any(x => x.Id == id && Definition.Contains(x)) ? 1 : 0)).ToString();
         if (cardPreview is not null) InsertPreview();
+        if (IsPinnedOverlay) NotifyPinnedScrollabilityIfChanged(force: true);
     }
     internal bool BeginCardDrag(Guid id)
     {
@@ -357,7 +397,14 @@ internal sealed partial class ColumnSurface : SurfaceWindow
     public void PrepareHide()
     {
         flushInline?.Invoke();
-        foreach (var item in items.OfType<WorkItem>()) RenderedCard(item.Id)?.SetMarquees(false);
+        foreach (var item in items.OfType<WorkItem>())
+        {
+            if (RenderedCard(item.Id) is { } card)
+            {
+                card.CloseReminderPreview();
+                card.SetMarquees(false);
+            }
+        }
         InvalidateAnimation();
     }
     private static T? Ancestor<T>(DependencyObject? source) where T : DependencyObject
@@ -389,11 +436,12 @@ internal sealed partial class TaskCard : Border
     private bool pressed;
     private long flashGeneration;
     private Popup? reminderPopup;
-    private System.Windows.Threading.DispatcherTimer? reminderLeaveTimer;
+    private System.Windows.Threading.DispatcherTimer? reminderPollTimer;
+    private long reminderOutsideSince;
     private FrameworkElement? timerDotTarget;
     internal int BuildCount { get; private set; }
     private TaskPresentationSnapshot? presentationKey;
-    private sealed record StagePresentationSnapshot(Guid Id, string Name, string Text, bool? IsRunning, AiPlatform? Platform, string? ThreadId, string? ThreadName, bool Attention);
+    private sealed record StagePresentationSnapshot(Guid Id, string Name, string Text, bool? IsRunning, AiPlatform? Platform, string? ThreadId, string? ThreadName, bool Attention, bool Expanded);
     private sealed record OptionPresentationSnapshot(string Name, string Color);
     private sealed class TaskPresentationSnapshot
     {
@@ -409,6 +457,7 @@ internal sealed partial class TaskCard : Border
         public required TimeSpan ReminderTime { get; init; }
         public required DateTime ReminderNextLocal { get; init; }
         public required bool EllipsizeStageDetails { get; init; }
+        public required string ThemeId { get; init; }
         public required StagePresentationSnapshot[] Stages { get; init; }
         public required OptionPresentationSnapshot[] Ai { get; init; }
         public required OptionPresentationSnapshot? Priority { get; init; }
@@ -420,6 +469,7 @@ internal sealed partial class TaskCard : Border
                 || ReminderEnabled != other.ReminderEnabled || ReminderRepeat != other.ReminderRepeat
                 || ReminderTime != other.ReminderTime || ReminderNextLocal != other.ReminderNextLocal
                 || EllipsizeStageDetails != other.EllipsizeStageDetails
+                || !string.Equals(ThemeId, other.ThemeId, StringComparison.Ordinal)
                 || !string.Equals(DisplayTitle, other.DisplayTitle, StringComparison.Ordinal)
                 || PendingReasons.Length != other.PendingReasons.Length
                 || Stages.Length != other.Stages.Length
@@ -442,7 +492,7 @@ internal sealed partial class TaskCard : Border
         for (var i = 0; i < visibleStages.Count; i++)
         {
             var s = visibleStages[i];
-            stageSnaps[i] = new StagePresentationSnapshot(s.Id, s.Name, s.Text, s.IsRunning, s.Codex?.Platform, s.Codex?.ThreadId, s.Codex?.ThreadName, ConversationJumpButton.Attention(item, s));
+            stageSnaps[i] = new StagePresentationSnapshot(s.Id, s.Name, s.Text, s.IsRunning, s.Codex?.Platform, s.Codex?.ThreadId, s.Codex?.ThreadName, ConversationJumpButton.Attention(item, s), !ArchivedPreview && Controller.Engine.IsStageDetailsExpanded(item.Id, s.Id));
         }
         var aiSnaps = Controller.Engine.State.AiOptions.Where(x => item.AiIds.Contains(x.Id)).Select(x => new OptionPresentationSnapshot(x.Name, x.Color)).ToArray();
         var priority = Controller.Engine.State.PriorityOptions.FirstOrDefault(x => x.Id == item.PriorityId);
@@ -460,6 +510,7 @@ internal sealed partial class TaskCard : Border
             ReminderTime = item.Reminder.Time,
             ReminderNextLocal = item.Reminder.NextLocal,
             EllipsizeStageDetails = Controller.Engine.State.Preferences.EllipsizeStageDetails,
+            ThemeId = ThemePalette.Current.Id,
             Stages = stageSnaps,
             Ai = aiSnaps,
             Priority = priority is null ? null : new OptionPresentationSnapshot(priority.Name, priority.Color)
@@ -470,12 +521,7 @@ internal sealed partial class TaskCard : Border
         TaskCardLayout.Frame(this); Cursor = Cursors.Hand;
         DataContextChanged += (_, _) => { CloseReminderPreview(); RestoreAfterRemoval(); Build(); };
         Unloaded += (_, _) => { CloseReminderPreview(); RestoreAfterRemoval(); };
-        PreviewMouseDown += (_,e) =>
-        {
-            if (ConversationDragButton.Contains(e.OriginalSource as DependencyObject) || ConversationJumpButton.Contains(e.OriginalSource as DependencyObject) || IsTimerDot(e.OriginalSource as DependencyObject)) return;
-            if (!ArchivedPreview && DataContext is WorkItem { TimerUnread: true } item)
-            { item.TimerUnread = false; Controller.Engine.Touch(); Dispatcher.BeginInvoke(new Action(() => Controller.Engine.Notify([item.Id])), System.Windows.Threading.DispatcherPriority.Background); }
-        };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) CloseReminderPreview(); };
         MouseLeftButtonDown += (_, e) => { if (SurfaceWindow.IsInteractive(e.OriginalSource as DependencyObject)) return; start = e.GetPosition(this); pressed = true; CaptureMouse(); e.Handled = true; };
         MouseMove += (_, e) =>
         {
@@ -496,6 +542,7 @@ internal sealed partial class TaskCard : Border
     private void Build()
     {
         CloseReminderPreview();
+        timerDotTarget = null;
         BuildCount++;
         if (collapseScopes > 0) return;
         if (DataContext is not WorkItem item || Controller is null) return;
@@ -534,7 +581,7 @@ internal sealed partial class TaskCard : Border
             if (showNames)
             {
                 if (stage != stages[0]) section.Children.Add(new CardSeparator(Ui.Line) { Tag = "TaskStageSeparator" });
-                var name = Ui.Pill(stage.Name, "#9CAAC2"); name.HorizontalAlignment = HorizontalAlignment.Left;
+                var name = Ui.Pill(stage.Name, ThemePalette.Current.MutedHex); name.HorizontalAlignment = HorizontalAlignment.Left;
                 name.Tag = "TaskStageName";
                 var label = (TextBlock)name.Child; label.FontSize = 12; label.TextWrapping = TextWrapping.NoWrap; label.TextTrimming = TextTrimming.CharacterEllipsis;
                 name.Child = null; name.Child = new MarqueeText(label);
@@ -542,7 +589,10 @@ internal sealed partial class TaskCard : Border
                 if (stage == stages[0]) { firstHeading = heading; firstPill = name; }
             }
             var details = ConversationJumpButton.Details(Controller, item, stage, 14, Ui.Text,
-                Controller.Engine.State.Preferences.EllipsizeStageDetails, showNames ? 42 : 64, ArchivedPreview);
+                Controller.Engine.State.Preferences.EllipsizeStageDetails, showNames ? 42 : 64, ArchivedPreview,
+                adaptiveEllipsize: true,
+                userExpanded: !ArchivedPreview && Controller.Engine.IsStageDetailsExpanded(item.Id, stage.Id),
+                onToggleExpanded: ArchivedPreview ? null : next => { Controller.Engine.SetStageDetailsExpanded(item.Id, stage.Id, next); Controller.Persist(); });
             var text = (StageDetailsText)details.Children[0];
             if (stage == stages[0]) firstDetails = text;
             section.Children.Add(details);
@@ -553,7 +603,7 @@ internal sealed partial class TaskCard : Border
         var priority = Controller.Engine.State.PriorityOptions.FirstOrDefault(x => x.Id == item.PriorityId);
         if (priority is not null) pills.Children.Add(Ui.Pill(priority.Name, priority.Color));
         stack.Children.Add(pills);
-        if (item.PendingReasons.Count > 0) stack.Children.Add(Ui.Label(string.Join(" · ", item.PendingReasons), 11, Ui.Brush("#E9C582")));
+        if (item.PendingReasons.Count > 0) stack.Children.Add(Ui.Label(string.Join(" · ", item.PendingReasons), 11, Ui.Warn));
         Compact(stack); var content = new Grid(); content.Children.Add(stack);
         if (firstHeading is not null && firstPill is not null && firstDetails is not null)
         {
@@ -567,13 +617,13 @@ internal sealed partial class TaskCard : Border
                 Width = 16, Height = 16,
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(0, -4, -4, 0),
-                Background = Ui.Brush("#01192333"),
+                Background = Ui.HitSurface,
                 Cursor = Cursors.Hand,
                 Tag = "TaskTimerDot"
             };
             dotHost.Children.Add(new System.Windows.Shapes.Ellipse
             {
-                Width = 6, Height = 6, Fill = Ui.Brush("#F28F98"),
+                Width = 6, Height = 6, Fill = Ui.Danger,
                 HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(0, 4, 4, 0),
                 IsHitTestVisible = false
@@ -581,9 +631,8 @@ internal sealed partial class TaskCard : Border
             if (!ArchivedPreview)
             {
                 timerDotTarget = dotHost;
-                dotHost.MouseEnter += (_, _) => { reminderLeaveTimer?.Stop(); OpenReminderPreview(item, dotHost); };
-                dotHost.MouseLeave += (_, _) => ScheduleCloseReminderPreview();
-                dotHost.PreviewMouseLeftButtonDown += (_, e) => { OpenReminderPreview(item, dotHost); e.Handled = true; };
+                dotHost.MouseEnter += (_, _) => { reminderOutsideSince = 0; OpenReminderPreview(item, dotHost); };
+                dotHost.PreviewMouseLeftButtonDown += (_, e) => { reminderOutsideSince = 0; OpenReminderPreview(item, dotHost); e.Handled = true; };
                 dotHost.PreviewMouseLeftButtonUp += (_, e) => e.Handled = true;
             }
             content.Children.Add(dotHost);
@@ -681,37 +730,89 @@ internal sealed partial class TaskCard : Border
             if (node is FrameworkElement { Tag: "TaskTimerDot" or "DismissReminderBubble" }) return true;
         return false;
     }
-    private void CloseReminderPreview()
+    internal void CloseReminderPreview()
     {
-        reminderLeaveTimer?.Stop();
+        reminderPollTimer?.Stop();
+        reminderOutsideSince = 0;
         if (reminderPopup is not null) { reminderPopup.IsOpen = false; reminderPopup.Child = null; reminderPopup = null; }
-        timerDotTarget = null;
     }
-    private void ScheduleCloseReminderPreview()
+    internal bool IsReminderPreviewOpenForVerification => reminderPopup is not null && (reminderPopup.IsOpen || Controller?.Smoke == true);
+    internal static bool IsPointerInReminderCorridor(Rect anchorScreen, Rect popupScreen, Point pointerScreen)
     {
-        reminderLeaveTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        reminderLeaveTimer.Stop();
-        reminderLeaveTimer.Tick -= OnReminderLeaveTick;
-        reminderLeaveTimer.Tick += OnReminderLeaveTick;
-        reminderLeaveTimer.Start();
+        if (anchorScreen.IsEmpty || popupScreen.IsEmpty) return false;
+        var paddedAnchor = anchorScreen;
+        paddedAnchor.Inflate(4, 4);
+        var paddedPopup = popupScreen;
+        paddedPopup.Inflate(2, 2);
+        return HoverCorridor.Contains(paddedAnchor, paddedPopup, pointerScreen);
     }
-    private void OnReminderLeaveTick(object? sender, EventArgs e)
+    internal bool PollReminderHoverForVerification(Point pointerScreen, long nowTickMs, Rect anchorScreen, Rect popupScreen)
     {
-        reminderLeaveTimer?.Stop();
-        if (reminderPopup is { IsOpen: true } popup && (timerDotTarget?.IsMouseOver == true || (popup.Child is UIElement child && child.IsMouseOver)))
-            return;
-        if (reminderPopup is not null) reminderPopup.IsOpen = false;
-    }
-    private static string ReminderCaption(WorkItem item)
-    {
-        if (!item.Reminder.Enabled) return "定时提醒到期";
-        var timeText = item.Reminder.Time.ToString(@"hh\:mm");
-        return item.Reminder.Repeat switch
+        if (reminderPopup is null) return false;
+        if (IsPointerInReminderCorridor(anchorScreen, popupScreen, pointerScreen))
         {
-            Repeat.Daily => $"定时提醒 · 每天 {timeText}",
-            Repeat.Weekly => $"定时提醒 · 每{new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)item.Reminder.Weekday]} {timeText}",
-            _ => $"定时提醒 · {item.Reminder.NextLocal:M月d日 HH:mm}"
-        };
+            reminderOutsideSince = 0;
+            return true;
+        }
+        if (reminderOutsideSince == 0)
+        {
+            reminderOutsideSince = nowTickMs;
+            return true;
+        }
+        if (nowTickMs - reminderOutsideSince >= 120)
+        {
+            CloseReminderPreview();
+            return false;
+        }
+        return true;
+    }
+    private void StartReminderHoverPolling()
+    {
+        reminderOutsideSince = 0;
+        if (reminderPollTimer is null)
+        {
+            reminderPollTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+            reminderPollTimer.Tick += OnReminderPollTick;
+        }
+        reminderPollTimer.Stop();
+        reminderPollTimer.Start();
+    }
+    private void OnReminderPollTick(object? sender, EventArgs e)
+    {
+        if (reminderPopup is not { IsOpen: true } popup || !IsVisible || timerDotTarget is null || !timerDotTarget.IsLoaded
+            || PresentationSource.FromVisual(timerDotTarget) is null
+            || popup.Child is not FrameworkElement child || !child.IsLoaded
+            || PresentationSource.FromVisual(child) is not System.Windows.Interop.HwndSource { Handle: var popupHandle } || popupHandle == IntPtr.Zero)
+        {
+            CloseReminderPreview();
+            return;
+        }
+        var anchorTopLeft = timerDotTarget.PointToScreen(new Point(0, 0));
+        var anchorBottomRight = timerDotTarget.PointToScreen(new Point(timerDotTarget.ActualWidth, timerDotTarget.ActualHeight));
+        var anchorBounds = new Rect(anchorTopLeft, anchorBottomRight);
+        var popupBounds = Native.ScreenBounds(popupHandle);
+        var cursor = System.Windows.Forms.Cursor.Position;
+        var pointer = new Point(cursor.X, cursor.Y);
+        var now = Environment.TickCount64;
+        if (IsPointerInReminderCorridor(anchorBounds, popupBounds, pointer))
+        {
+            reminderOutsideSince = 0;
+            return;
+        }
+        if (reminderOutsideSince == 0) reminderOutsideSince = now;
+        else if (now - reminderOutsideSince >= 120) CloseReminderPreview();
+    }
+    internal static string FormatReminderTime(Reminder reminder, DateTime now)
+    {
+        var timeText = reminder.Time.ToString(@"hh\:mm");
+        if (reminder.Enabled && reminder.Repeat == Repeat.Daily) return $"每天 {timeText}";
+        if (reminder.Enabled && reminder.Repeat == Repeat.Weekly)
+            return $"每{new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)reminder.Weekday]} {timeText}";
+        var when = reminder.LastOccurrence ?? reminder.NextLocal;
+        if (when.Date == now.Date) return $"今天 {when:HH:mm}";
+        if (when.Date == now.Date.AddDays(1)) return $"明天 {when:HH:mm}";
+        if (when.Date == now.Date.AddDays(-1)) return $"昨天 {when:HH:mm}";
+        return $"{when:M月d日 HH:mm}";
     }
     internal Popup? OpenReminderPreviewForVerification()
     {
@@ -720,45 +821,65 @@ internal sealed partial class TaskCard : Border
     }
     private Popup OpenReminderPreview(WorkItem item, FrameworkElement anchor)
     {
-        if (reminderPopup is { IsOpen: true }) return reminderPopup;
+        timerDotTarget = anchor;
+        if (reminderPopup is { IsOpen: true }) { reminderOutsideSince = 0; return reminderPopup; }
         var body = new StackPanel { Margin = new Thickness(0) };
-        body.Children.Add(Ui.Label(ReminderCaption(item), 11, Ui.Brush("#E9C582")));
+        var timeLabel = new TextBlock
+        {
+            Text = FormatReminderTime(item.Reminder, DateTime.Now),
+            FontSize = 11,
+            Foreground = Ui.Warn,
+            TextWrapping = TextWrapping.NoWrap,
+            Margin = new Thickness(0),
+            Tag = "ReminderPreviewTime"
+        };
+        body.Children.Add(timeLabel);
         var dismiss = Ui.Button("关闭提醒", () =>
         {
             CloseReminderPreview();
             Controller.DismissTaskReminder(item.Id);
         });
         dismiss.Tag = "DismissReminderBubble";
-        dismiss.Margin = new Thickness(0, 6, 0, 0);
-        dismiss.Padding = new Thickness(12, 4, 12, 4);
+        dismiss.FontSize = 12;
+        dismiss.MinHeight = 28;
+        dismiss.Margin = new Thickness(0, 5, 0, 0);
+        dismiss.Padding = new Thickness(10, 4, 10, 4);
         dismiss.HorizontalAlignment = HorizontalAlignment.Left;
         dismiss.ToolTip = "清除本次到期标记并关闭此任务的定时提醒";
         body.Children.Add(dismiss);
         var frame = new Border
         {
-            Background = Ui.Brush("#F2192333"),
-            BorderBrush = Ui.Line,
+            Background = Ui.HintBackground,
+            BorderBrush = Ui.ButtonBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(10, 8, 10, 8),
+            Padding = new Thickness(8, 6, 8, 6),
             Child = body
         };
-        frame.MouseEnter += (_, _) => reminderLeaveTimer?.Stop();
-        frame.MouseLeave += (_, _) => ScheduleCloseReminderPreview();
+        frame.MouseEnter += (_, _) => reminderOutsideSince = 0;
         var popup = new Popup
         {
             PlacementTarget = anchor,
             Placement = PlacementMode.Bottom,
-            VerticalOffset = 4,
-            HorizontalOffset = -60,
+            VerticalOffset = 3,
+            HorizontalOffset = -48,
             StaysOpen = false,
             AllowsTransparency = true,
             Tag = "TimerReminderPreviewPopup",
             Child = frame
         };
-        popup.Closed += (_, _) => reminderLeaveTimer?.Stop();
+        popup.Closed += (_, _) =>
+        {
+            reminderPollTimer?.Stop();
+            reminderOutsideSince = 0;
+            if (ReferenceEquals(reminderPopup, popup)) { reminderPopup.Child = null; reminderPopup = null; }
+        };
         reminderPopup = popup;
-        if (!Controller.Smoke) popup.IsOpen = true;
+        if (!Controller.Smoke)
+        {
+            popup.IsOpen = true;
+            StartReminderHoverPolling();
+        }
         return popup;
     }
     public void StopFlash() { flashGeneration++; if (BorderBrush is SolidColorBrush brush && !brush.IsFrozen) brush.BeginAnimation(SolidColorBrush.ColorProperty, null); BorderBrush = Ui.Line; }

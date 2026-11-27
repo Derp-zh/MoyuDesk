@@ -36,8 +36,17 @@ internal sealed partial class BoardController
         foreach (var column in Columns)
         {
             column.ApplySettings(); column.Refresh();
-            column.Reveal(Expanded && ColumnIsVisible(column), false);
+            if (column.Definition.BuiltinLane == Lane.Action && ShouldKeepActionPinnedVisible)
+            {
+                column.SetPinnedOverlay(true);
+                if (!OffscreenNoShow) column.Reveal(true, false);
+            }
+            else if (!OffscreenNoShow)
+            {
+                column.Reveal(Expanded && ColumnIsVisible(column), false);
+            }
         }
+        SyncActionPinOverlay();
         Engine.Touch();
     }
     internal void SetFocusCompletedOpen(bool open)

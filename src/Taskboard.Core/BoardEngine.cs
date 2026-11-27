@@ -25,7 +25,6 @@ public sealed partial class BoardEngine(BoardState state)
         if (existing is not null) { existing.Visible = true; return existing; }
         var item = State.Tasks.FirstOrDefault(x => x.Id == id) ?? State.Archives.FirstOrDefault(x => x.Item.Id == id)?.Item
             ?? throw new InvalidOperationException("任务已被删除。");
-        if (item.TimerUnread) { item.TimerUnread = false; Notify([id]); }
         var s = new EditSession { TaskId = id, Original = Copies.Of(item), Working = Copies.Of(item), CreatedUtc = DateTime.UtcNow };
         State.Sessions.Add(s); Touch(); return s;
     }
@@ -73,7 +72,12 @@ public sealed partial class BoardEngine(BoardState state)
             State.Tasks[index] = result;
             if (live.Lane != result.Lane || live.ColumnId != result.ColumnId) { State.Tasks.Remove(result); State.Tasks.Add(result); }
             CleanReferences(result);
-            result.TimerUnread = false;
+            if (ReminderChanged(session.Original.Reminder, edited.Reminder))
+            {
+                result.TimerUnread = false;
+                result.PendingReasons.RemoveAll(x => x == "定时提醒到期");
+            }
+            PruneExpandedStageDetails();
             result.UpdatedUtc = DateTime.UtcNow;
             State.Sessions.Remove(session);
             if (!extraNotified.Contains(result.Id)) extraNotified.Insert(0, result.Id);
@@ -196,7 +200,7 @@ public sealed partial class BoardEngine(BoardState state)
         var item = State.Tasks.First(x => x.Id == taskId); var stage = item.Stages.First(x => x.Id == stageId);
         if (stage.IsRunning == running) return true;
         if (!CanSetStageRunning(item, stageId, running)) return false;
-        var before = Copies.Of(item); stage.IsRunning = running; item.TimerUnread = false; item.UpdatedUtc = DateTime.UtcNow;
+        var before = Copies.Of(item); stage.IsRunning = running; item.UpdatedUtc = DateTime.UtcNow;
         Remember(new(before, Copies.Of(item), State.Tasks.IndexOf(item), false)); Notify([item.Id]);
         return true;
     }
@@ -212,7 +216,7 @@ public sealed partial class BoardEngine(BoardState state)
         var original = Copies.Of(item);
         State.Tasks.Remove(item);
         item.Lane = lane;
-        item.ColumnId = columnId; item.TimerUnread = false;
+        item.ColumnId = columnId;
         var acknowledged = new List<Guid> { id };
         if (lane == Lane.Running && columnId is null && (original.Lane != Lane.Running || original.ColumnId is not null))
         {
@@ -227,7 +231,7 @@ public sealed partial class BoardEngine(BoardState state)
             target = last < 0 ? State.Tasks.Count : last + 1;
         }
         State.Tasks.Insert(target, item);
-        if (index == target && original.Lane == lane && original.ColumnId == columnId && !original.TimerUnread && acknowledged.Count == 1) return;
+        if (index == target && original.Lane == lane && original.ColumnId == columnId && acknowledged.Count == 1) return;
         Remember(new(original, Copies.Of(item), index, true));
         item.UpdatedUtc = DateTime.UtcNow; Notify(acknowledged);
     }
@@ -252,7 +256,45 @@ public sealed partial class BoardEngine(BoardState state)
     {
         var item = State.Tasks.First(x => x.Id == id);
         Remember(new(Copies.Of(item), null, State.Tasks.IndexOf(item), true));
-        State.Tasks.Remove(item); State.Sessions.RemoveAll(x => x.TaskId == id); Notify([id]);
+        State.Tasks.Remove(item); State.Sessions.RemoveAll(x => x.TaskId == id); PruneExpandedStageDetails(); Notify([id]);
+    }
+
+    internal static bool ReminderChanged(Reminder a, Reminder b) =>
+        a.Enabled != b.Enabled || a.Repeat != b.Repeat || a.Time != b.Time || a.Weekday != b.Weekday || a.NextLocal != b.NextLocal;
+
+    public static string StageDetailsKey(Guid taskId, Guid stageId) => $"{taskId:N}:{stageId:N}";
+    public bool IsStageDetailsExpanded(Guid taskId, Guid stageId)
+        => State.Preferences.ExpandedStageDetails.Contains(StageDetailsKey(taskId, stageId));
+    public bool SetStageDetailsExpanded(Guid taskId, Guid stageId, bool expanded)
+    {
+        var key = StageDetailsKey(taskId, stageId);
+        PruneExpandedStageDetails();
+        bool changed;
+        if (expanded)
+        {
+            if (State.Preferences.ExpandedStageDetails.Contains(key)) return false;
+            State.Preferences.ExpandedStageDetails.Add(key);
+            changed = true;
+        }
+        else
+        {
+            changed = State.Preferences.ExpandedStageDetails.RemoveAll(x => string.Equals(x, key, StringComparison.Ordinal)) > 0;
+        }
+        if (changed) Notify([taskId]);
+        return changed;
+    }
+    internal void PruneExpandedStageDetails()
+    {
+        var list = State.Preferences.ExpandedStageDetails;
+        if (list.Count == 0) return;
+        var valid = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var task in State.Tasks)
+            foreach (var stage in task.Stages)
+                valid.Add(StageDetailsKey(task.Id, stage.Id));
+        foreach (var archive in State.Archives)
+            foreach (var stage in archive.Item.Stages)
+                valid.Add(StageDetailsKey(archive.Item.Id, stage.Id));
+        list.RemoveAll(key => !valid.Contains(key));
     }
 
     public void Undo()

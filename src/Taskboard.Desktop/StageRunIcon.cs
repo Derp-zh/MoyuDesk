@@ -16,14 +16,17 @@ internal sealed class StageRunIcon : Viewbox
         {
             foreach (var left in new[] { 3.0, 8.0 })
             {
-                var bar = new Rectangle { Width = 3, Height = 10, Fill = Ui.Accent };
+                var bar = new Rectangle { Width = 3, Height = 10 };
+                Ui.BindBrush(bar, Shape.FillProperty, "AccentBrush", Ui.Accent);
                 Canvas.SetLeft(bar, left); Canvas.SetTop(bar, 2); canvas.Children.Add(bar);
             }
         }
         else
         {
             var geometry = Geometry.Parse("M 3.5,1.5 L 12,7 L 3.5,12.5 Z"); geometry.Freeze();
-            canvas.Children.Add(new Path { Data = geometry, Fill = Ui.Muted });
+            var play = new Path { Data = geometry };
+            Ui.BindBrush(play, Shape.FillProperty, "MutedBrush", Ui.Muted);
+            canvas.Children.Add(play);
         }
         Child = canvas;
     }

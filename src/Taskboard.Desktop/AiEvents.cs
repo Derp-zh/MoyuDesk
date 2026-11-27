@@ -137,7 +137,6 @@ internal sealed class AiEventState(AiPlatform platform, string session)
 {
     private readonly Dictionary<string, AiPending> pending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Name, string Fingerprint)> tools = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, string> permissionTools = new(StringComparer.Ordinal);
     private string epoch = "", turn = "";
     private long sequence = -1;
     private DateTime started;
@@ -150,14 +149,14 @@ internal sealed class AiEventState(AiPlatform platform, string session)
     internal void Apply(AiRawEvent e)
     {
         if (e.SessionId != session || e.Seq <= sequence && e.Epoch == epoch) return;
-        if (epoch.Length > 0 && e.Epoch != epoch) { pending.Clear(); tools.Clear(); permissionTools.Clear(); turn = ""; phase = CodexPhase.Unknown; planMode = false; }
+        if (epoch.Length > 0 && e.Epoch != epoch) { pending.Clear(); tools.Clear(); turn = ""; phase = CodexPhase.Unknown; planMode = false; }
         if (platform == AiPlatform.ClaudeCode && sequence >= 0 && epoch == e.Epoch && e.Seq != sequence + 1) complete = false;
         epoch = e.Epoch; sequence = e.Seq;
         if (e.Turn.Length > 0 && turn.Length > 0 && e.Turn != turn && e.Kind is not ("UserPromptSubmit" or "turn/start")) return;
         LastEventUtc = e.AtUtc;
         var wasExecuting = executing; var priorTurn = turn;
         void Begin()
-        { turn = e.Turn.Length > 0 ? e.Turn : e.Epoch + ":" + e.Seq; started = e.AtUtc; pending.Clear(); tools.Clear(); permissionTools.Clear(); phase = CodexPhase.Running; executing = true; }
+        { turn = e.Turn.Length > 0 ? e.Turn : e.Epoch + ":" + e.Seq; started = e.AtUtc; pending.Clear(); tools.Clear(); phase = CodexPhase.Running; executing = true; }
         void Wait(string id, bool approval) { if (pending.Count >= 128) { complete = false; return; } pending[id] = new(id, approval); executing = false; }
         switch (e.Kind)
         {
@@ -174,7 +173,7 @@ internal sealed class AiEventState(AiPlatform platform, string session)
                 var matches = tools.Where(x => x.Value.Name == e.Name && x.Value.Fingerprint == e.Fingerprint).Select(x => x.Key).ToArray();
                 if (matches.Length == 0) matches = tools.Where(x => x.Value.Name == e.Name).Select(x => x.Key).ToArray();
                 if (matches.Length > 0) foreach (var match in matches) Wait("tool:" + match, e.Name != "AskUserQuestion");
-                else { var key = "permission:" + e.Seq; Wait(key, e.Name != "AskUserQuestion"); if (e.Name.Length > 0 && pending.ContainsKey(key)) permissionTools[key] = e.Name; }
+                else Wait("permission:" + e.Seq, e.Name != "AskUserQuestion");
                 break;
             case "Notification":
                 if (turn.Length == 0) break;
@@ -188,18 +187,8 @@ internal sealed class AiEventState(AiPlatform platform, string session)
                 else { var forms = pending.Keys.Where(x => x.StartsWith("elicitation:" + e.Name + ":", StringComparison.Ordinal)).ToArray(); if (forms.Length == 1) pending.Remove(forms[0]); }
                 executing = false; break;
             case "PostToolUse": case "PostToolUseFailure": case "PermissionDenied":
-                var removed = pending.Remove("tool:" + e.Id); tools.Remove(e.Id);
-                if (!removed && e.Name.Length > 0)
-                {
-                    var anonymous = permissionTools.Where(x => x.Value == e.Name).Select(x => x.Key).ToArray();
-                    if (anonymous.Length == 1) { removed = pending.Remove(anonymous[0]); permissionTools.Remove(anonymous[0]); }
-                }
-                if (!removed && pending.Count == 1)
-                {
-                    var only = pending.Keys.First();
-                    if (only.StartsWith("notice:", StringComparison.Ordinal)) pending.Remove(only);
-                }
-                if (e.Outcome == "interrupted") { phase = CodexPhase.Interrupted; executing = false; pending.Clear(); permissionTools.Clear(); break; }
+                pending.Remove("tool:" + e.Id); tools.Remove(e.Id);
+                if (e.Outcome == "interrupted") { phase = CodexPhase.Interrupted; executing = false; pending.Clear(); break; }
                 executing = e.Kind != "PermissionDenied" && e.Name is not ("AskUserQuestion" or "ExitPlanMode") && pending.Count == 0;
                 if (executing) phase = CodexPhase.Running;
                 break;
@@ -213,9 +202,9 @@ internal sealed class AiEventState(AiPlatform platform, string session)
             case "execution":
                 if (turn.Length > 0 && pending.Count == 0) { phase = CodexPhase.Running; executing = true; }
                 break;
-            case "Stop": case "turn/completed": phase = CodexPhase.ReadyForReview; pending.Clear(); tools.Clear(); permissionTools.Clear(); executing = false; break;
-            case "StopFailure": case "turn/failed": phase = CodexPhase.Failed; pending.Clear(); tools.Clear(); permissionTools.Clear(); executing = false; break;
-            case "turn/interrupted": phase = CodexPhase.Interrupted; pending.Clear(); tools.Clear(); permissionTools.Clear(); executing = false; break;
+            case "Stop": case "turn/completed": phase = CodexPhase.ReadyForReview; pending.Clear(); tools.Clear(); executing = false; break;
+            case "StopFailure": case "turn/failed": phase = CodexPhase.Failed; pending.Clear(); tools.Clear(); executing = false; break;
+            case "turn/interrupted": phase = CodexPhase.Interrupted; pending.Clear(); tools.Clear(); executing = false; break;
             case "SessionEnd": phase = CodexPhase.Unknown; executing = false; break;
             case "unavailable": complete = false; phase = CodexPhase.Unknown; executing = false; break;
         }

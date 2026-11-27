@@ -25,7 +25,7 @@ internal sealed class ConversationDragButton : Button
         this.controller = controller; taskId = item.Id; stageId = stage.Id; caption = name.Label.Text;
         Tag = "TaskConversationDrag"; DataContext = stage;
         Margin = name.Margin; name.Margin = new Thickness(0); Content = name;
-        Padding = new Thickness(0); BorderThickness = new Thickness(0); Background = Ui.Brush("#01192333");
+        Padding = new Thickness(0); BorderThickness = new Thickness(0); Background = Ui.HitSurface;
         HorizontalAlignment = HorizontalAlignment.Right; VerticalAlignment = VerticalAlignment.Center;
         HorizontalContentAlignment = HorizontalAlignment.Stretch; Cursor = Cursors.Hand;
         ToolTip = "单击打开任务编辑；按住拖到 Codex 会话后松开绑定。Esc 取消拖动。";

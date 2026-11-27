@@ -4,6 +4,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../DataPaths.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../Program.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../StartupLinks.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../AppUpdater.cs" />
   </ItemGroup>
   <ItemGroup><Compile Include="$(MSBuildThisFileDirectory)../DeviceOnboarding.cs" /></ItemGroup>
 </Project>

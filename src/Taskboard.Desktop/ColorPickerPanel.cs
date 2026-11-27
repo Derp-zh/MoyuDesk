@@ -78,7 +78,7 @@ internal sealed class ColorPickerPanel : Border
     private static Brush Contrast(string value)
     { ColorValue.TryParse(value, out var c); return c.R * .299 + c.G * .587 + c.B * .114 > 155 ? Ui.Brush("#152033") : Brushes.White; }
     private void Invalid(string message)
-    { InputValid = false; apply.IsEnabled = false; notice.Text = message; notice.Foreground = Ui.Brush("#F28F98"); notice.Visibility = Visibility.Visible; }
+    { InputValid = false; apply.IsEnabled = false; notice.Text = message; notice.Foreground = Ui.Danger; notice.Visibility = Visibility.Visible; }
     private void ReadHex()
     { if (ColorValue.TryParse(hex.Text, out var color)) SetColor(ColorValue.Hex(color), preserveHex: true); else Invalid("HEX请输入3位或6位色值，例如 #C1A0EB。"); }
     private void ReadRgb()
@@ -99,8 +99,11 @@ internal sealed class ColorPickerPanel : Border
             if (!fromSpectrum) { var hsv = ColorValue.Hsv(color); if (hsv.saturation > 0) spectrum.Hue = hsv.hue; spectrum.Saturation = hsv.saturation; spectrum.Value = hsv.value; }
             hue.Value = spectrum.Hue; spectrum.InvalidateVisual(); preview.Background = new SolidColorBrush(color);
             ((TextBlock)preview.Child).Foreground = Contrast(SelectedColor);
-            var lowContrast = color.R * .299 + color.G * .587 + color.B * .114 < 75;
-            notice.Text = lowContrast ? "此颜色在深色背景上较暗，可提高明度。" : "";
+            var luma = color.R * .299 + color.G * .587 + color.B * .114;
+            var lowContrast = ThemePalette.Current.IsDark ? luma < 75 : luma > 205;
+            notice.Text = lowContrast
+                ? (ThemePalette.Current.IsDark ? "此颜色在深色背景上较暗，可提高明度。" : "此颜色在浅色背景上较浅，可加深明度。")
+                : "";
             notice.Foreground = Ui.Muted; notice.Visibility = lowContrast ? Visibility.Visible : Visibility.Collapsed;
         }
         finally { updating = false; }

@@ -33,13 +33,21 @@ internal sealed class LiveBackdrop : IDisposable
     private readonly ContainerVisual displayRoot;
     private readonly ContainerVisual root;
     private ContainerVisual? shownAnimation;
-    private CompositionBackdropBrush brush;
+    private CompositionBackdropBrush? hostBrush;
+    private CompositionColorBrush? solidBrush;
+    private sealed record RegionSlot(ContainerVisual Holder, SpriteVisual Backdrop, CompositionRoundedRectangleGeometry? RoundedClip, SpriteVisual? Tint);
     private readonly List<IDisposable> shapes = new();
-    private readonly List<ContainerVisual> regionHolders = new();
+    private readonly List<RegionSlot> regionSlots = new();
     private readonly Dictionary<(float Radius, bool Bottom, bool Left), CompositionDrawingSurface> cornerMasks = new();
     private GlassRegion[] previous = [];
     private double previousScale;
     private double? previousTint;
+    private bool previousOpaque;
+    private Windows.UI.Color previousSurfaceColor;
+    internal Windows.UI.Color LastSurfaceColor => previousSurfaceColor;
+    internal bool UsesHostBackdropBrush { get; private set; }
+    internal int RebuildCount { get; private set; }
+    internal int InPlaceUpdateCount { get; private set; }
     private DesktopWindowTarget? animationTarget;
     private ContainerVisual? animationRoot;
     private CompositionDrawingSurface? animationSurface;
@@ -51,6 +59,16 @@ internal sealed class LiveBackdrop : IDisposable
     private long animationGeneration;
     private static CompositorPixels? pixels;
     internal static Compositor Compositor => compositor!;
+    private CompositionBackdropBrush EnsureHostBrush() => hostBrush ??= compositor!.CreateHostBackdropBrush();
+    private CompositionColorBrush EnsureSolidBrush(Windows.UI.Color surfaceColor)
+    {
+        var opaque = Windows.UI.Color.FromArgb(255, surfaceColor.R, surfaceColor.G, surfaceColor.B);
+        if (solidBrush is null) solidBrush = compositor!.CreateColorBrush(opaque);
+        else if (solidBrush.Color != opaque) solidBrush.Color = opaque;
+        return solidBrush;
+    }
+    private CompositionBrush ActiveBackdropBrush(bool opaque, Windows.UI.Color? surfaceColor = null) =>
+        opaque ? EnsureSolidBrush(surfaceColor ?? (previousSurfaceColor.A != 0 ? previousSurfaceColor : ThemePalette.Current.SurfaceCompositionColor)) : EnsureHostBrush();
     internal LiveBackdrop(IntPtr hwnd)
     {
         if (compositor is null)
@@ -70,47 +88,78 @@ internal sealed class LiveBackdrop : IDisposable
         finally { Marshal.Release(raw); }
         displayRoot = compositor.CreateContainerVisual(); root = compositor.CreateContainerVisual();
         displayRoot.RelativeSizeAdjustment = Vector2.One;
-        displayRoot.Children.InsertAtBottom(root); target.Root = displayRoot; brush = compositor.CreateHostBackdropBrush();
+        displayRoot.Children.InsertAtBottom(root); target.Root = displayRoot;
     }
-    internal void Update(IEnumerable<GlassRegion> regions, double scale, double? tintTransparency = null)
+    internal void Update(IEnumerable<GlassRegion> regions, double scale, double? tintTransparency = null, bool opaqueBackdrop = false, Windows.UI.Color? surfaceColor = null)
     {
-        var current = regions.ToArray(); if (scale == previousScale && tintTransparency == previousTint && current.SequenceEqual(previous)) return;
-        if (scale == previousScale && tintTransparency == previousTint && current.Length == previous.Length && regionHolders.Count == current.Length)
+        var surface = surfaceColor ?? ThemePalette.Current.SurfaceCompositionColor;
+        var current = regions.ToArray();
+        if (scale == previousScale && tintTransparency == previousTint && opaqueBackdrop == previousOpaque && surface == previousSurfaceColor && current.SequenceEqual(previous)) return;
+        if (scale == previousScale && tintTransparency == previousTint && opaqueBackdrop == previousOpaque && surface == previousSurfaceColor
+            && current.Length == previous.Length && regionSlots.Count == current.Length)
         {
-            var offsetOnly = true;
+            var canUpdateInPlace = true;
             for (var i = 0; i < current.Length; i++)
             {
-                var a = previous[i]; var b = current[i];
+                var a = previous[i]; var b = current[i]; var slot = regionSlots[i];
                 if (a.Bounds.Width <= 0 || a.Bounds.Height <= 0 || b.Bounds.Width <= 0 || b.Bounds.Height <= 0
-                    || a.Bounds.Width != b.Bounds.Width || a.Bounds.Height != b.Bounds.Height
                     || a.VisibleFrom != b.VisibleFrom || a.Radius != b.Radius || a.FillCornerGaps != b.FillCornerGaps
                     || a.FlatRight != b.FlatRight || a.FlatLeft != b.FlatLeft)
-                { offsetOnly = false; break; }
+                { canUpdateInPlace = false; break; }
+                var sizeChanged = a.Bounds.Width != b.Bounds.Width || a.Bounds.Height != b.Bounds.Height;
+                if (sizeChanged && (a.VisibleFrom > 0 || a.FillCornerGaps || slot.RoundedClip is null))
+                { canUpdateInPlace = false; break; }
             }
-            if (offsetOnly)
+            if (canUpdateInPlace)
             {
                 previous = current;
                 for (var i = 0; i < current.Length; i++)
-                    regionHolders[i].Offset = new Vector3((float)(current[i].Bounds.X * scale), (float)(current[i].Bounds.Y * scale), 0);
+                {
+                    var b = current[i]; var slot = regionSlots[i];
+                    var size = new Vector2((float)(b.Bounds.Width * scale), (float)(b.Bounds.Height * scale));
+                    slot.Holder.Offset = new Vector3((float)(b.Bounds.X * scale), (float)(b.Bounds.Y * scale), 0);
+                    if (slot.Holder.Size != size)
+                    {
+                        slot.Holder.Size = size;
+                        slot.Backdrop.Size = size;
+                        if (slot.Tint is not null) slot.Tint.Size = size;
+                        if (slot.RoundedClip is not null)
+                        {
+                            var radius = (float)(b.Radius * scale);
+                            slot.RoundedClip.Size = size + new Vector2(b.FlatRight || b.FlatLeft ? radius : 0, 0);
+                            slot.RoundedClip.Offset = b.FlatLeft ? new Vector2(-radius, 0) : Vector2.Zero;
+                        }
+                    }
+                }
+                InPlaceUpdateCount++;
                 _ = compositor!.RequestCommitAsync();
                 return;
             }
         }
-        previous = current; previousScale = scale; previousTint = tintTransparency;
-        root.Children.RemoveAll(); regionHolders.Clear(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear();
+        previous = current; previousScale = scale; previousTint = tintTransparency; previousOpaque = opaqueBackdrop; previousSurfaceColor = surface;
+        root.Children.RemoveAll(); regionSlots.Clear(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear();
+        var hasVisibleRegion = false;
         foreach (var region in current)
         {
             var bounds = region.Bounds; if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+            hasVisibleRegion = true;
             var holder = compositor!.CreateContainerVisual(); holder.Offset = new Vector3((float)(bounds.X * scale), (float)(bounds.Y * scale), 0);
             holder.Size = new Vector2((float)(bounds.Width * scale), (float)(bounds.Height * scale));
-            AddRegionBackdrop(holder, region, scale, shapes); root.Children.InsertAtTop(holder); shapes.Add(holder); regionHolders.Add(holder);
-            if (tintTransparency is double transparency)
+            var (backdropSprite, roundedClip) = AddRegionBackdrop(holder, region, scale, shapes, opaque: opaqueBackdrop, surfaceColor: surface);
+            root.Children.InsertAtTop(holder); shapes.Add(holder);
+            SpriteVisual? tintVisual = null;
+            if (!opaqueBackdrop && tintTransparency is double transparency)
             {
-                var paint = compositor.CreateColorBrush(Windows.UI.Color.FromArgb((byte)Math.Round(255 * (1 - transparency / 100)), 25, 35, 51));
+                var paint = compositor.CreateColorBrush(Windows.UI.Color.FromArgb((byte)Math.Round(255 * (1 - transparency / 100)), surface.R, surface.G, surface.B));
                 var tint = compositor.CreateSpriteVisual(); tint.Size = holder.Size; tint.Brush = paint;
                 holder.Children.InsertAtTop(tint); shapes.Add(paint); shapes.Add(tint);
+                tintVisual = tint;
             }
+            regionSlots.Add(new RegionSlot(holder, backdropSprite, roundedClip, tintVisual));
         }
+        UsesHostBackdropBrush = !opaqueBackdrop && hasVisibleRegion;
+        RebuildCount++;
+        _ = compositor!.RequestCommitAsync();
     }
     internal async Task Animate(IntPtr hwnd, byte[] image, int width, int height, bool horizontal, double from, double to, Action ready, Action finished, Func<Task>? synchronizeStart = null, Action? started = null, bool flatRight = false)
     {
@@ -175,7 +224,7 @@ internal sealed class LiveBackdrop : IDisposable
             var holder = compositor!.CreateContainerVisual(); var bounds = region.Bounds;
             holder.Offset = new Vector3((float)(bounds.X*previousScale),(float)(bounds.Y*previousScale),0);
             holder.Size = new Vector2((float)(bounds.Width*previousScale),(float)(bounds.Height*previousScale));
-            AddRegionBackdrop(holder, region, previousScale, animationParts); animationRoot.Children.InsertAtTop(holder); animationParts.Add(holder);
+            AddRegionBackdrop(holder, region, previousScale, animationParts, opaque: previousOpaque); animationRoot.Children.InsertAtTop(holder); animationParts.Add(holder);
         }
         var ui = compositor!.CreateSpriteVisual(); ui.Size = new Vector2(width,height); ui.Brush = compositor.CreateSurfaceBrush(animationSurface); animationParts.Add(ui.Brush); animationParts.Add(ui);
         animationRoot.Children.InsertAtTop(ui);
@@ -306,7 +355,7 @@ internal sealed class LiveBackdrop : IDisposable
         {
             var holder = compositor.CreateContainerVisual(); holder.Offset = new Vector3((float)(region.Bounds.X * previousScale), 0, 0);
             holder.Size = new Vector2((float)paneWidth, height);
-            AddRegionBackdrop(holder, region, previousScale, animationParts, cornerTint: true);
+            AddRegionBackdrop(holder, region, previousScale, animationParts, cornerTint: true, opaque: previousOpaque);
             var source = compositor.CreateSurfaceBrush(animationSurface); source.Stretch = CompositionStretch.None;
             source.HorizontalAlignmentRatio = source.VerticalAlignmentRatio = 0; source.Offset = new Vector2((float)(-region.Bounds.X * previousScale), 0);
             var ui = compositor.CreateSpriteVisual(); ui.Size = holder.Size; ui.Brush = source;
@@ -385,7 +434,7 @@ internal sealed class LiveBackdrop : IDisposable
         {
             var holder = compositor!.CreateContainerVisual(); holder.Size = new Vector2((float)paneWidth, height); ClipRounded(holder, (float)(20 * previousScale), animationParts);
             var content = compositor.CreateContainerVisual(); content.Size = holder.Size; content.Clip = compositor.CreateInsetClip();
-            var glass = compositor.CreateSpriteVisual(); glass.Size = holder.Size; glass.Brush = brush; content.Children.InsertAtBottom(glass); animationParts.Add(glass);
+            var glass = compositor.CreateSpriteVisual(); glass.Size = holder.Size; glass.Brush = ActiveBackdropBrush(previousOpaque); content.Children.InsertAtBottom(glass); animationParts.Add(glass);
             var tint = compositor.CreateSpriteVisual(); tint.Size = holder.Size; tint.Brush = CardTint(animationParts); content.Children.InsertAtTop(tint); animationParts.Add(tint);
             var oldUi = Image(source); var newUi = Image(settled); newUi.Opacity = 0;
             content.Children.InsertAtTop(oldUi); content.Children.InsertAtTop(newUi); holder.Children.InsertAtTop(content);
@@ -395,8 +444,8 @@ internal sealed class LiveBackdrop : IDisposable
             fadeIn.InsertKeyFrame(0, 0); fadeIn.InsertKeyFrame(150f / 360, 0); fadeIn.InsertKeyFrame(190f / 360, 1); fadeIn.InsertKeyFrame(1, 1);
             roleFades.Add((oldUi, fadeOut)); roleFades.Add((newUi, fadeIn));
             animationParts.Add(fadeOut); animationParts.Add(fadeIn); animationParts.Add(content.Clip); animationParts.Add(content); animationParts.Add(holder);
-            var left = AddCornerPair(holder, (float)(20 * previousScale), left: true, tint: true, animationParts);
-            var right = AddCornerPair(holder, (float)(20 * previousScale), left: false, tint: true, animationParts);
+            var left = AddCornerPair(holder, (float)(20 * previousScale), left: true, tint: true, animationParts, opaque: previousOpaque);
+            var right = AddCornerPair(holder, (float)(20 * previousScale), left: false, tint: true, animationParts, opaque: previousOpaque);
             return (holder, (InsetClip)content.Clip, left, right);
             SpriteVisual Image(byte[] bytes)
             {
@@ -406,32 +455,37 @@ internal sealed class LiveBackdrop : IDisposable
             }
         }
     }
-    private void ClipRounded(ContainerVisual holder, float radius, List<IDisposable> parts, bool flatRight = false, bool flatLeft = false)
+    private CompositionRoundedRectangleGeometry ClipRounded(ContainerVisual holder, float radius, List<IDisposable> parts, bool flatRight = false, bool flatLeft = false)
     {
-        var geometry = CreateShape(holder.Size + new Vector2(flatRight || flatLeft ? radius : 0, 0), radius);
-        if (flatLeft && geometry is CompositionRoundedRectangleGeometry rectangle) rectangle.Offset = new Vector2(-radius, 0);
-        var clip = compositor!.CreateGeometricClip(geometry); holder.Clip = clip;
+        var geometry = compositor!.CreateRoundedRectangleGeometry();
+        geometry.Size = holder.Size + new Vector2(flatRight || flatLeft ? radius : 0, 0);
+        geometry.CornerRadius = new Vector2(radius);
+        if (flatLeft) geometry.Offset = new Vector2(-radius, 0);
+        var clip = compositor.CreateGeometricClip(geometry); holder.Clip = clip;
         parts.Add(geometry); parts.Add(clip);
+        return geometry;
     }
-    private void AddRegionBackdrop(ContainerVisual holder, GlassRegion region, double scale, List<IDisposable> parts, bool cornerTint = false)
+    private (SpriteVisual Backdrop, CompositionRoundedRectangleGeometry RoundedClip) AddRegionBackdrop(ContainerVisual holder, GlassRegion region, double scale, List<IDisposable> parts, bool cornerTint = false, bool opaque = false, Windows.UI.Color? surfaceColor = null)
     {
         var radius = (float)(region.Radius * scale); var cut = (float)(region.VisibleFrom * scale);
-        ClipRounded(holder, radius, parts, region.FlatRight, region.FlatLeft);
-        var glass = compositor!.CreateSpriteVisual(); glass.Size = holder.Size; glass.Brush = brush;
+        var roundedClip = ClipRounded(holder, radius, parts, region.FlatRight, region.FlatLeft);
+        var glass = compositor!.CreateSpriteVisual(); glass.Size = holder.Size; glass.Brush = ActiveBackdropBrush(opaque, surfaceColor);
         var clip = compositor.CreateInsetClip(cut, 0, 0, 0); glass.Clip = clip;
         holder.Children.InsertAtBottom(glass); parts.Add(clip); parts.Add(glass);
         if (region.FillCornerGaps && cut > 0)
         {
-            var corners = AddCornerPair(holder, radius, left: false, tint: cornerTint, parts);
+            var corners = AddCornerPair(holder, radius, left: false, tint: cornerTint, parts, opaque: opaque);
             corners.Offset = new Vector3(cut - radius, 0, 0);
         }
+        return (glass, roundedClip);
     }
     private CompositionColorBrush CardTint(List<IDisposable> parts)
     {
-        var color = Windows.UI.Color.FromArgb((byte)Math.Round(255 * (1 - SurfaceWindow.FloatingTransparency / 100)), 25, 35, 51);
+        var surface = ThemePalette.Current.SurfaceColor;
+        var color = Windows.UI.Color.FromArgb((byte)Math.Round(255 * (1 - SurfaceWindow.FloatingTransparency / 100)), surface.R, surface.G, surface.B);
         var tint = compositor!.CreateColorBrush(color); parts.Add(tint); return tint;
     }
-    private ContainerVisual AddCornerPair(ContainerVisual holder, float radius, bool left, bool tint, List<IDisposable> parts)
+    private ContainerVisual AddCornerPair(ContainerVisual holder, float radius, bool left, bool tint, List<IDisposable> parts, bool opaque = false)
     {
         var factory = compositor!;
         var pair = factory.CreateContainerVisual(); pair.Size = new Vector2(radius, holder.Size.Y); parts.Add(pair);
@@ -456,7 +510,7 @@ internal sealed class LiveBackdrop : IDisposable
             // BackdropBrush is not a supported MaskBrush source. Its opaque
             // live sample can cover this tiny corner square under the front
             // card; only the dark tint needs the exact non-overlapping mask.
-            var glass = factory.CreateSpriteVisual(); glass.Size = patch.Size; glass.Brush = brush; patch.Children.InsertAtTop(glass); parts.Add(glass);
+            var glass = factory.CreateSpriteVisual(); glass.Size = patch.Size; glass.Brush = ActiveBackdropBrush(opaque); patch.Children.InsertAtTop(glass); parts.Add(glass);
             if (tintBrush is not null) AddMasked(tintBrush);
             pair.Children.InsertAtTop(patch);
             void AddMasked(CompositionBrush source)
@@ -471,8 +525,10 @@ internal sealed class LiveBackdrop : IDisposable
     internal void SetVisible(bool visible) {root.Opacity=visible?1:0;_=compositor!.RequestCommitAsync();}
     internal void RefreshSource()
     {
-        var regions=previous; var scale=previousScale; previous=[]; previousScale=0;
-        brush.Dispose(); brush=compositor!.CreateHostBackdropBrush(); Update(regions,scale,previousTint); _=compositor.RequestCommitAsync();
+        var regions=previous; var scale=previousScale; var tint=previousTint; var opaque=previousOpaque; var surface=previousSurfaceColor;
+        previous=[]; previousScale=0;
+        hostBrush?.Dispose(); hostBrush = null;
+        Update(regions,scale,tint,opaque,surface.A != 0 ? surface : ThemePalette.Current.SurfaceCompositionColor); _=compositor!.RequestCommitAsync();
     }
     internal void Prepare(byte[] image, int width, int height)
     {
@@ -488,7 +544,7 @@ internal sealed class LiveBackdrop : IDisposable
         var rectangle=compositor!.CreateRoundedRectangleGeometry(); rectangle.Size=size; rectangle.CornerRadius=new Vector2(radius); return rectangle;
     }
     public void Dispose()
-    { CancelAnimation(); animationSurface?.Dispose(); root.Children.RemoveAll(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear(); foreach (var mask in cornerMasks.Values) mask.Dispose(); cornerMasks.Clear(); brush.Dispose(); root.Dispose(); displayRoot.Dispose(); target.Dispose(); }
+    { CancelAnimation(); animationSurface?.Dispose(); root.Children.RemoveAll(); regionSlots.Clear(); foreach (var shape in shapes) shape.Dispose(); shapes.Clear(); foreach (var mask in cornerMasks.Values) mask.Dispose(); cornerMasks.Clear(); hostBrush?.Dispose(); hostBrush = null; solidBrush?.Dispose(); solidBrush = null; root.Dispose(); displayRoot.Dispose(); target.Dispose(); }
 }
 
 internal sealed class GlassContentHost : HwndHost
@@ -496,6 +552,8 @@ internal sealed class GlassContentHost : HwndHost
     internal bool AnimationHidden { get; set; }
     internal double FixedCanvasWidth { get; set; }
     internal bool AnchorCanvasRight { get; set; } = true;
+    internal Func<bool>? ShouldActivateOnClick { get; set; }
+    internal Action? EnsureHostActivated { get; set; }
     private IntPtr ownerHandle;
     [StructLayout(LayoutKind.Sequential)] private struct ClientRect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out ClientRect rect);
@@ -512,9 +570,47 @@ internal sealed class GlassContentHost : HwndHost
             WindowStyle = 0x40000000 | (AnimationHidden ? 0 : 0x10000000), UsesPerPixelTransparency = true, TreatAsInputRoot = true,
             Width = Math.Max(1, (int)ActualWidth), Height = Math.Max(1, (int)ActualHeight) };
         source = new HwndSource(parameters); source.RootVisual = root;
+        Native.EnsureDefaultImeContext(source.Handle);
+        source.AddHook(ChildWndProc);
         return new HandleRef(this, source.Handle);
     }
-    protected override void DestroyWindowCore(HandleRef hwnd) { source?.Dispose(); source = null; }
+    protected override void DestroyWindowCore(HandleRef hwnd)
+    {
+        if (source is not null) { source.RemoveHook(ChildWndProc); source.Dispose(); source = null; }
+    }
+    private IntPtr ChildWndProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WmMouseActivate = 0x0021;
+        const int WmLButtonDown = 0x0201;
+        const int WmRButtonDown = 0x0204;
+        const int MaActivate = 1;
+        // Clicking inside the child WPF input root must activate the top-level
+        // owner window BEFORE TextBox focus runs, keep Win32 focus on ContentHandle,
+        // and return MA_ACTIVATE so DefWindowProc does not bubble WM_MOUSEACTIVATE
+        // back to the outer shell for a second activation that disturbs TSF focus.
+        if (message == WmMouseActivate && ownerHandle != IntPtr.Zero && (ShouldActivateOnClick?.Invoke() ?? false))
+        {
+            if (Native.GetForegroundWindow() != ownerHandle) EnsureHostActivated?.Invoke();
+            EnsureNativeFocus();
+            handled = true;
+            return new IntPtr(MaActivate);
+        }
+        if (message is WmLButtonDown or WmRButtonDown && ownerHandle != IntPtr.Zero && (ShouldActivateOnClick?.Invoke() ?? false))
+        {
+            if (Native.GetForegroundWindow() != ownerHandle)
+            {
+                EnsureHostActivated?.Invoke();
+                EnsureNativeFocus();
+            }
+        }
+        return IntPtr.Zero;
+    }
+    internal bool EnsureNativeFocus()
+    {
+        if (ContentHandle == IntPtr.Zero || AnimationHidden || !Native.IsWindowVisible(ContentHandle)) return false;
+        if (Native.GetFocus() != ContentHandle) Native.SetFocus(ContentHandle);
+        return true;
+    }
     protected override void OnWindowPositionChanged(Rect rectangle)
     {
         // The default HwndHost placement briefly moves the full text canvas

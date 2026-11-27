@@ -8,7 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>Taskboard</AssemblyName>
-    <Version>0.9.53</Version>
+    <Version>0.9.56</Version>
     <DraftSwitchSpeed Condition="'$(DraftSwitchSpeed)' == ''">1.35</DraftSwitchSpeed>
     <DefineConstants Condition="'$(DraftSwitchSpeed)' == '1.35'">$(DefineConstants);FAST_DRAFT_SWITCH</DefineConstants>
     <Product>摸鱼台 · MoyuDesk</Product>
@@ -21,6 +21,7 @@
   <ItemGroup>
     <Content Include="integrations/dsh-observer.mjs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Resource Include="Assets/orb.ico" />
+    <Resource Include="Assets/orb.png" />
     <Resource Include="Assets/HelpScreenshots/*.png" />
     <EmbeddedResource Include="Assets/Alarm04.wav" LogicalName="Taskboard.DefaultNotification.wav" />
     <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />

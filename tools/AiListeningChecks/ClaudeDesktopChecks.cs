@@ -104,17 +104,22 @@ internal static class ClaudeDesktopChecks
         }
         var capped = ClaudeDesktopCatalog.Load(manyHome);
         check(capped.Length == 2000, "超过2000个桌面会话文件时按上限保留有效会话而非清空全部");
+        // #03-撤回补丁：无 PreToolUse 精确配对的匿名权限请求或 Notification 回退不靠 PostToolUse 猜测结清
         var permOnly = new AiEventState(Taskboard.Core.AiPlatform.ClaudeCode, "local_perm");
         permOnly.Apply(new("local_perm", "e1", 0, DateTime.UtcNow, "UserPromptSubmit", "t1"));
         permOnly.Apply(new("local_perm", "e1", 1, DateTime.UtcNow, "PermissionRequest", "t1", "", "Bash"));
-        check(permOnly.Snapshot.Pending is [{ Approval: true }], "未收到PreToolUse的匿名权限请求正常进入等待批准");
+        check(permOnly.Snapshot.Pending is [{ Approval: true }], "未收到PreToolUse的匿名权限请求进入等待批准");
         permOnly.Apply(new("local_perm", "e1", 2, DateTime.UtcNow, "PostToolUse", "t1", "tool-bash", "Bash"));
-        check(permOnly.Snapshot.Pending.Length == 0 && permOnly.Snapshot.Executing, "单一同名匿名权限请求在工具完成后可精准结清并恢复执行");
+        check(permOnly.Snapshot.Pending.Length == 1 && !permOnly.Snapshot.Executing, "撤回匿名猜测补丁后，无PreToolUse配对的PostToolUse不猜测结清权限等待");
+        permOnly.Apply(new("local_perm", "e1", 3, DateTime.UtcNow, "Stop", "t1"));
+        check(permOnly.Snapshot.Pending.Length == 0 && permOnly.Snapshot.Phase == Taskboard.Core.CodexPhase.ReadyForReview, "轮次结束Stop严格清理未配对等待");
         var noticeOnly = new AiEventState(Taskboard.Core.AiPlatform.ClaudeCode, "local_notice");
         noticeOnly.Apply(new("local_notice", "e1", 0, DateTime.UtcNow, "UserPromptSubmit", "t1"));
         noticeOnly.Apply(new("local_notice", "e1", 1, DateTime.UtcNow, "Notification", "t1", "", "", "", "permission_prompt"));
-        check(noticeOnly.Snapshot.Pending is [{ Approval: true }], "Notification权限提示回退进入等待批准");
+        check(noticeOnly.Snapshot.Pending is [{ Approval: true }], "Notification权限提示进入等待批准");
         noticeOnly.Apply(new("local_notice", "e1", 2, DateTime.UtcNow, "PostToolUse", "t1", "tool-read", "Read"));
-        check(noticeOnly.Snapshot.Pending.Length == 0 && noticeOnly.Snapshot.Executing, "单一Notification回退提示在后续工具完成后可精准结清");
+        check(noticeOnly.Snapshot.Pending.Length == 1 && !noticeOnly.Snapshot.Executing, "撤回Notification唯一等待猜测补丁后，后续PostToolUse不猜测结清");
+        noticeOnly.Apply(new("local_notice", "e1", 3, DateTime.UtcNow, "Stop", "t1"));
+        check(noticeOnly.Snapshot.Pending.Length == 0 && noticeOnly.Snapshot.Phase == Taskboard.Core.CodexPhase.ReadyForReview, "轮次结束Stop严格清理Notification等待");
     }
 }

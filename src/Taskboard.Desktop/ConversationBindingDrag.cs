@@ -89,7 +89,7 @@ internal sealed class ConversationBindingDrag : IDisposable
                 Background = Brushes.Transparent, ShowActivated = false, ShowInTaskbar = false, Topmost = true,
                 IsHitTestVisible = false, SizeToContent = SizeToContent.WidthAndHeight, Left = -12000, Top = -12000,
                 Title = "拖动绑定会话 · 名称预览",
-                Content = new Border { Background = Ui.Brush("#ED192333"), BorderBrush = Ui.Accent, BorderThickness = new Thickness(1),
+                Content = new Border { Background = Ui.HintBackground, BorderBrush = Ui.Accent, BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(8), Padding = new Thickness(10, 7, 10, 7), Child = pane } };
             ghost.SourceInitialized += (_, _) =>
             {

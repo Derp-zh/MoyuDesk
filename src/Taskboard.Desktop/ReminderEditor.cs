@@ -21,40 +21,55 @@ internal sealed class ReminderEditor : StackPanel
     private readonly StackPanel fields = new(), dateRow = new(), weekRow = new(), relative = new();
     private readonly TextBox time, date;
     private readonly ComboBox repeat, weekday;
-    private readonly TextBlock error = Ui.Label("", 11, Ui.Brush("#F28F98"));
+    private readonly TextBlock error = Ui.Label("", 11, Ui.Danger);
     private readonly TextBlock summary = Ui.Label("", 12, Ui.Accent);
     private readonly Popup timePopup = new(), datePopup = new();
     private bool setting;
     internal ReminderEditor(Reminder reminder, Action changed, Func<DateTime>? clock = null)
     {
         this.reminder = reminder; this.changed = changed; now = clock ?? (() => DateTime.Now); Tag = "ReminderEditor";
-        var heading = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 8) };
-        enabled = new CheckBox { Tag = "ReminderToggle", Width = 22, Height = 22, IsChecked = reminder.Enabled,
-            VerticalAlignment = VerticalAlignment.Center, Clip = new EllipseGeometry(new Point(11, 11), 11, 11) };
+        enabled = new CheckBox
+        {
+            Tag = "ReminderToggle",
+            Content = "定时提醒",
+            IsChecked = reminder.Enabled,
+            Margin = new Thickness(0, 4, 0, 8),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = Cursors.Hand
+        };
         System.Windows.Automation.AutomationProperties.SetName(enabled, "定时提醒");
-        heading.Children.Add(enabled); heading.Children.Add(Ui.Label("定时提醒")); Children.Add(heading); Children.Add(fields);
+        Children.Add(enabled); Children.Add(fields);
+        var initialSchedule = reminder.Enabled ? reminder.NextLocal : Reminder.DefaultNextLocal(now());
+        var initialTime = reminder.Enabled ? reminder.Time : initialSchedule.TimeOfDay;
+        var initialWeekday = reminder.Enabled ? reminder.Weekday : initialSchedule.DayOfWeek;
         repeat = new ComboBox { ItemsSource = new[] { "一次", "每天", "每周" }, SelectedIndex = (int)reminder.Repeat,
             MinHeight = 34, Margin = new Thickness(0, 0, 0, 8), Tag = "ReminderRepeat" };
         System.Windows.Automation.AutomationProperties.SetName(repeat, "重复方式"); fields.Children.Add(repeat);
-        date = Ui.Input(reminder.NextLocal.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture)); date.MaxLength = 32; date.Tag = "ReminderDate";
+        date = Ui.Input(initialSchedule.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture)); date.MaxLength = 32; date.Tag = "ReminderDate";
         date.ToolTip = "输入日期，例如2026/11/14，或打开日历选择";
-        time = Ui.Input(reminder.Time.ToString(@"hh\:mm", CultureInfo.InvariantCulture)); time.MaxLength = 8; time.Tag = "ReminderTime";
+        time = Ui.Input(initialTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture)); time.MaxLength = 8; time.Tag = "ReminderTime";
         RoundedInput.SetEdgeArrowNavigation(time, false);
         time.ToolTip = "24小时制，例如09:05；可输入、选择，或用上下键调整分钟";
         System.Windows.Automation.AutomationProperties.SetName(date, "提醒日期"); System.Windows.Automation.AutomationProperties.SetName(time, "提醒时间，24小时制");
         dateRow.Children.Add(Ui.Label("日期", 11, Ui.Muted));
         dateRow.Children.Add(Field(date, "日历", "ReminderDateOpen", () => OpenDate()));
-        var dates = new WrapPanel();
-        foreach (var offset in new[] { 0, 1 }) { var day = offset; var b = Ui.Button(day == 0 ? "今天" : "明天", () => { date.Text = now().Date.AddDays(day).ToString("yyyy/MM/dd", CultureInfo.InvariantCulture); Update(false); }); b.Tag = day == 0 ? "ReminderToday" : "ReminderTomorrow"; dates.Children.Add(b); }
+        var dates = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+        foreach (var offset in new[] { 0, 1 }) { var day = offset; var b = Ui.Button(day == 0 ? "今天" : "明天", () => { date.Text = now().Date.AddDays(day).ToString("yyyy/MM/dd", CultureInfo.InvariantCulture); Update(false); }); b.Tag = day == 0 ? "ReminderToday" : "ReminderTomorrow"; b.MinHeight = 30; b.Padding = new Thickness(11, 5, 11, 5); b.Margin = new Thickness(0, 2, 6, 4); dates.Children.Add(b); }
         dateRow.Children.Add(dates); fields.Children.Add(dateRow);
         weekday = new ComboBox { ItemsSource = new[] { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" },
-            SelectedIndex = (int)reminder.Weekday, MinHeight = 34, Margin = new Thickness(0, 0, 0, 8), Tag = "ReminderWeekday" };
+            SelectedIndex = (int)initialWeekday, MinHeight = 34, Margin = new Thickness(0, 0, 0, 8), Tag = "ReminderWeekday" };
         System.Windows.Automation.AutomationProperties.SetName(weekday, "提醒星期"); weekRow.Children.Add(weekday); fields.Children.Add(weekRow);
         fields.Children.Add(Ui.Label("时间 · 24小时制", 11, Ui.Muted)); fields.Children.Add(Field(time, "选择时间", "ReminderTimeOpen", () => OpenTime()));
-        var shortcuts = new WrapPanel();
-        foreach (var minutes in new[] { 15, 30, 60 }) { var delay = minutes; var b = Ui.Button(delay == 60 ? "1小时后" : delay + "分钟后", () => SetRelative(delay)); b.Tag = "ReminderAfter"; b.DataContext = delay; shortcuts.Children.Add(b); }
+        var shortcuts = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+        foreach (var minutes in new[] { 15, 30, 60 }) { var delay = minutes; var b = Ui.Button(delay == 60 ? "1小时后" : delay + "分钟后", () => SetRelative(delay)); b.Tag = "ReminderAfter"; b.DataContext = delay; b.MinHeight = 30; b.Padding = new Thickness(11, 5, 11, 5); b.Margin = new Thickness(0, 2, 6, 4); shortcuts.Children.Add(b); }
         relative.Children.Add(shortcuts); fields.Children.Add(relative); summary.Tag = "ReminderSummary"; error.Tag = "ReminderError"; fields.Children.Add(summary); fields.Children.Add(error);
-        enabled.Click += (_, _) => { ClosePopups(); Update(false); };
+        enabled.Click += (_, _) =>
+        {
+            ClosePopups();
+            if (enabled.IsChecked == true && !reminder.Enabled) ApplyDefaultSchedule(now());
+            Update(false);
+        };
         repeat.SelectionChanged += (_, _) => { ClosePopups(); Update(false); }; weekday.SelectionChanged += (_, _) => Update(false);
         foreach (var box in new[] { time, date })
         {
@@ -74,7 +89,7 @@ internal sealed class ReminderEditor : StackPanel
     private static Grid Field(TextBox input, string caption, string tag, Action open)
     {
         var row = new Grid(); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        row.Children.Add(input); var button = Ui.Button(caption, open); button.Tag = tag; button.Margin = new Thickness(8, 4, 0, 8); Grid.SetColumn(button, 1); row.Children.Add(button); return row;
+        row.Children.Add(input); var button = Ui.Button(caption, open); button.Tag = tag; button.MinHeight = 34; button.Padding = new Thickness(12, 6, 12, 6); button.Margin = new Thickness(8, 4, 0, 8); Grid.SetColumn(button, 1); row.Children.Add(button); return row;
     }
     private void RefreshVisibility()
     {
@@ -119,6 +134,18 @@ internal sealed class ReminderEditor : StackPanel
         summary.Text = reminder.Repeat switch { Repeat.Daily => "每天 " + reminder.Time.ToString(@"hh\:mm"), Repeat.Weekly => "每" + new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" }[(int)reminder.Weekday] + " " + reminder.Time.ToString(@"hh\:mm"), _ => reminder.NextLocal.ToString("M月d日 dddd HH:mm") };
         error.Visibility = error.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
+    private void ApplyDefaultSchedule(DateTime current)
+    {
+        var target = Reminder.DefaultNextLocal(current);
+        setting = true;
+        try
+        {
+            date.Text = target.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
+            time.Text = target.TimeOfDay.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+            weekday.SelectedIndex = (int)target.DayOfWeek;
+        }
+        finally { setting = false; }
+    }
     private void SetRelative(int minutes)
     {
         var target = now().AddMinutes(minutes); setting = true; date.Text = target.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture); time.Text = target.ToString("HH:mm", CultureInfo.InvariantCulture); setting = false; Update(false);
@@ -156,27 +183,105 @@ internal sealed class ReminderEditor : StackPanel
     private void OpenTime()
     {
         if (timePopup.IsOpen) { timePopup.IsOpen = false; return; } datePopup.IsOpen = false;
-        var value = TryTime(time.Text, out var typed) ? typed : reminder.Time; var hour = value.Hours; var minute = value.Minutes;
-        var body = new StackPanel { Width = 276 }; body.Children.Add(Ui.Label("选择时间", 15)); var preview = Ui.Label("", 22, Ui.Accent); preview.Tag = "ReminderTimeCandidate"; body.Children.Add(preview);
-        var options = new System.Collections.Generic.List<(Button Button, bool Hour, int Value)>();
-        void Refresh() { preview.Text = $"{hour:00} : {minute:00}"; foreach (var option in options) { var selected = option.Value == (option.Hour ? hour : minute); option.Button.Background = selected ? Ui.Accent : Ui.Card; option.Button.Foreground = selected ? Ui.Brush("#102033") : Ui.Text; option.Button.FontWeight = selected ? FontWeights.Bold : FontWeights.Normal; } }
-        void AddGrid(bool hours)
+        var body = BuildTimePickerContent(() => { timePopup.IsOpen = false; time.Focus(); });
+        ShowPopup(timePopup, time, body, () => time.Focus());
+    }
+    internal StackPanel BuildTimePickerContent(Action? closePopup = null)
+    {
+        var value = TryTime(time.Text, out var typed) ? typed : reminder.Time;
+        var hour = value.Hours;
+        var minute = value.Minutes;
+        var body = new StackPanel { Width = 192, Tag = "ReminderTimePickerPanel" };
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        var preview = Ui.Label($"{hour:00}:{minute:00}", 18, Ui.Accent);
+        preview.FontWeight = FontWeights.SemiBold;
+        preview.Margin = new Thickness(0);
+        preview.VerticalAlignment = VerticalAlignment.Center;
+        preview.Tag = "ReminderTimeCandidate";
+        var done = Ui.Button("完成", () => closePopup?.Invoke());
+        done.Tag = "ReminderTimeClose";
+        done.MinHeight = 28;
+        done.Padding = new Thickness(11, 4, 11, 4);
+        done.Margin = new Thickness(0);
+        done.FontSize = 12;
+        DockPanel.SetDock(done, Dock.Right);
+        header.Children.Add(done);
+        header.Children.Add(preview);
+        body.Children.Add(header);
+
+        var columns = new Grid();
+        columns.ColumnDefinitions.Add(new ColumnDefinition());
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+        columns.ColumnDefinitions.Add(new ColumnDefinition());
+
+        var initializing = true;
+        void CommitSelection()
         {
-            body.Children.Add(Ui.Label(hours ? "小时" : "分钟", 11, Ui.Muted)); var grid = new UniformGrid { Columns = 6 };
-            foreach (var n in hours ? Enumerable.Range(0, 24) : Enumerable.Range(0, 12).Select(x => x * 5))
-            {
-                var number = n; var button = Ui.Button(n.ToString("00"), () => { if (hours) hour = number; else minute = number; Refresh(); });
-                button.Tag = hours ? "ReminderHour" : "ReminderMinute"; button.DataContext = n; button.Padding = new Thickness(2, 5, 2, 5); button.MinWidth = 0;
-                System.Windows.Automation.AutomationProperties.SetName(button, n.ToString("00") + (hours ? "时" : "分")); options.Add((button, hours, n)); grid.Children.Add(button);
-            }
-            body.Children.Add(grid);
+            preview.Text = $"{hour:00}:{minute:00}";
+            if (initializing) return;
+            setting = true;
+            time.Text = $"{hour:00}:{minute:00}";
+            setting = false;
+            Update(false);
         }
-        AddGrid(true); AddGrid(false); body.Children.Add(Ui.Label("任意分钟也可直接在时间框输入", 11, Ui.Muted));
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancel = Ui.Button("取消", () => { timePopup.IsOpen = false; time.Focus(); }); cancel.Tag = "ReminderTimeCancel"; actions.Children.Add(cancel);
-        var apply = Ui.Button("确定", () => { time.Text = $"{hour:00}:{minute:00}"; timePopup.IsOpen = false; Update(false); time.Focus(); }, true); apply.Tag = "ReminderTimeApply"; actions.Children.Add(apply); body.Children.Add(actions); Refresh();
-        ShowPopup(timePopup, time, new ScrollViewer { Content = body, MaxHeight = 520, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, () => time.Focus());
-        options.First(x => x.Hour && x.Value == hour).Button.Focus();
+
+        ListBox CreateColumn(string caption, string tag, int count, int selected, Action<int> onPick)
+        {
+            var col = new StackPanel();
+            var label = Ui.Label(caption, 11, Ui.Muted);
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 0, 4);
+            col.Children.Add(label);
+            var list = new ListBox
+            {
+                Tag = tag,
+                Height = 196,
+                Background = Ui.Field,
+                BorderBrush = Ui.InputBorder,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(2),
+                HorizontalContentAlignment = HorizontalAlignment.Center
+            };
+            ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
+            ScrollViewer.SetVerticalScrollBarVisibility(list, ScrollBarVisibility.Auto);
+            System.Windows.Automation.AutomationProperties.SetName(list, caption);
+            for (var n = 0; n < count; n++)
+            {
+                var item = new ListBoxItem
+                {
+                    Content = new TextBlock
+                    {
+                        Text = n.ToString("00", CultureInfo.InvariantCulture),
+                        FontSize = 13,
+                        Foreground = Ui.Text,
+                        HorizontalAlignment = HorizontalAlignment.Center
+                    },
+                    Tag = n,
+                    HorizontalContentAlignment = HorizontalAlignment.Center
+                };
+                list.Items.Add(item);
+            }
+            list.SelectedIndex = Math.Clamp(selected, 0, count - 1);
+            list.Loaded += (_, _) => { if (list.SelectedItem is not null) list.ScrollIntoView(list.SelectedItem); };
+            list.SelectionChanged += (_, _) =>
+            {
+                if (list.SelectedIndex < 0) return;
+                onPick(list.SelectedIndex);
+                CommitSelection();
+            };
+            col.Children.Add(list);
+            return list;
+        }
+
+        var hourList = CreateColumn("小时", "ReminderHourList", 24, hour, h => hour = h);
+        var minuteList = CreateColumn("分钟", "ReminderMinuteList", 60, minute, m => minute = m);
+        columns.Children.Add((UIElement)hourList.Parent);
+        var rightCol = (UIElement)minuteList.Parent;
+        Grid.SetColumn(rightCol, 2);
+        columns.Children.Add(rightCol);
+        body.Children.Add(columns);
+        initializing = false;
+        return body;
     }
     internal void ClosePopups() { timePopup.IsOpen = false; datePopup.IsOpen = false; }
 }

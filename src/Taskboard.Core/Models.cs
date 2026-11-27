@@ -5,6 +5,45 @@ namespace Taskboard.Core;
 public enum Lane { Inspiration, Refining, Running, Action, Paused, Done }
 public enum Repeat { Once, Daily, Weekly }
 public enum NewStageDefaultState { ContextDependent, AlwaysRunning, AlwaysInactive }
+public enum ThemeMode { Dark, Light, System }
+
+public static class ThemePresets
+{
+    public const string DefaultDark = "midnight-cyan";
+    public const string DefaultLight = "daylight-mist";
+
+    public static readonly string[] DarkIds =
+    [
+        "midnight-cyan",
+        "obsidian-amber",
+        "forest-jade",
+        "nebula-violet",
+        "graphite-coral"
+    ];
+
+    public static readonly string[] LightIds =
+    [
+        "daylight-mist",
+        "warm-paper",
+        "mint-breeze",
+        "lavender-day"
+    ];
+
+    public static bool IsValidDark(string? id) =>
+        !string.IsNullOrWhiteSpace(id) && DarkIds.Any(x => string.Equals(x, id, StringComparison.OrdinalIgnoreCase));
+
+    public static bool IsValidLight(string? id) =>
+        !string.IsNullOrWhiteSpace(id) && LightIds.Any(x => string.Equals(x, id, StringComparison.OrdinalIgnoreCase));
+
+    public static string NormalizeDark(string? id) =>
+        DarkIds.FirstOrDefault(x => string.Equals(x, id?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? DefaultDark;
+
+    public static string NormalizeLight(string? id) =>
+        LightIds.FirstOrDefault(x => string.Equals(x, id?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? DefaultLight;
+
+    public static ThemeMode NormalizeMode(ThemeMode mode) =>
+        Enum.IsDefined(mode) ? mode : ThemeMode.Dark;
+}
 
 public static class Names
 {
@@ -28,16 +67,27 @@ public sealed class Stage
 
 public sealed class Reminder
 {
+    public static DateTime DefaultNextLocal(DateTime now) =>
+        new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0).AddHours(1);
+
+    public Reminder()
+    {
+        var initial = DefaultNextLocal(DateTime.Now);
+        NextLocal = initial;
+        Weekday = initial.DayOfWeek;
+        Time = initial.TimeOfDay;
+    }
+
     [System.Text.Json.Serialization.JsonRequired]
     public bool Enabled { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
     public Repeat Repeat { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
-    public DateTime NextLocal { get; set; } = DateTime.Today.AddDays(1).AddHours(9);
+    public DateTime NextLocal { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
-    public DayOfWeek Weekday { get; set; } = DayOfWeek.Monday;
+    public DayOfWeek Weekday { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
-    public TimeSpan Time { get; set; } = TimeSpan.FromHours(9);
+    public TimeSpan Time { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
     public DateTime? LastOccurrence { get; set; }
 }
@@ -178,7 +228,8 @@ public sealed class Preferences : System.Text.Json.Serialization.IJsonOnDeserial
     public bool CompletedChronological { get; set; } = true;
     public bool RunningFocusMode { get; set; }
     public bool AutoOpenConversationBindingWindow { get; set; } = true;
-    public bool EllipsizeStageDetails { get; set; }
+    public bool EllipsizeStageDetails { get; set; } = true;
+    public List<string> ExpandedStageDetails { get; set; } = [];
     public bool CollapseInactiveStageDetails { get; set; } = true;
     public NewStageDefaultState NewStageDefaultState { get; set; } = NewStageDefaultState.ContextDependent;
     public int PlatformPaletteVersion { get; set; }
@@ -195,6 +246,10 @@ public sealed class Preferences : System.Text.Json.Serialization.IJsonOnDeserial
     public double GlassTransparency { get; set; } = 20;
     public double FloatingTransparency { get; set; } = 10;
     public double BallTransparency { get; set; } = 40;
+    public double PinnedActionTransparency { get; set; } = 70;
+    public ThemeMode ThemeMode { get; set; } = ThemeMode.Dark;
+    public string DarkThemePreset { get; set; } = ThemePresets.DefaultDark;
+    public string LightThemePreset { get; set; } = ThemePresets.DefaultLight;
     [System.Text.Json.Serialization.JsonRequired]
     public bool ResizeCorner { get; set; }
     [System.Text.Json.Serialization.JsonRequired]
@@ -209,6 +264,7 @@ public sealed class Preferences : System.Text.Json.Serialization.IJsonOnDeserial
     public Dictionary<string, string> MachineMarkers { get; set; } = [];
     void System.Text.Json.Serialization.IJsonOnDeserialized.OnDeserialized()
     {
+        Validation.Normalize(this);
         if (Columns is null) return;
         // These three built-ins could be deleted in previous versions. Preserve
         // the saved identity/name and the user's choice not to show the window.
@@ -443,6 +499,7 @@ public static class Copies
             RunningFocusMode = p.RunningFocusMode,
             AutoOpenConversationBindingWindow = p.AutoOpenConversationBindingWindow,
             EllipsizeStageDetails = p.EllipsizeStageDetails,
+            ExpandedStageDetails = [.. p.ExpandedStageDetails],
             CollapseInactiveStageDetails = p.CollapseInactiveStageDetails,
             NewStageDefaultState = p.NewStageDefaultState,
             PlatformPaletteVersion = p.PlatformPaletteVersion,
@@ -458,6 +515,10 @@ public static class Copies
             GlassTransparency = p.GlassTransparency,
             FloatingTransparency = p.FloatingTransparency,
             BallTransparency = p.BallTransparency,
+            PinnedActionTransparency = p.PinnedActionTransparency,
+            ThemeMode = p.ThemeMode,
+            DarkThemePreset = p.DarkThemePreset,
+            LightThemePreset = p.LightThemePreset,
             ResizeCorner = p.ResizeCorner,
             BallVisible = p.BallVisible,
             AutoStart = p.AutoStart,

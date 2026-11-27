@@ -56,16 +56,17 @@ internal sealed class EditorSurface : Grid
         var header = new Grid { Background = Brushes.Transparent, Cursor = System.Windows.Input.Cursors.SizeAll, Margin = new Thickness(14, 4, 10, 4) };
         header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         taskHeader = Ui.Label("", 13); taskHeader.Tag = "TaskEditorHeading"; taskHeader.TextWrapping = TextWrapping.NoWrap; taskHeader.TextTrimming = TextTrimming.CharacterEllipsis; header.Children.Add(taskHeader); RefreshArchiveCaption();
-        numberText = new TextBlock { FontSize = 12, Foreground = Brushes.White };
-        var legacyClose = Ui.Button("×", () => { }); legacyClose.FontFamily = new FontFamily("Microsoft YaHei UI");
-        legacyClose.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var badgeDiameter = Math.Min(legacyClose.DesiredSize.Width, legacyClose.DesiredSize.Height) - 6;
+        numberText = new TextBlock { FontSize = 12 };
+        Ui.BindBrush(numberText, TextBlock.ForegroundProperty, "CloseButtonTextBrush", Ui.CloseButtonText);
+        var badgeDiameter = DraftBadgeDiameter();
         draftNumber = new Border { Tag = "DraftOrdinal", Width = badgeDiameter, Height = badgeDiameter, Margin = new Thickness(3),
-            Background = Ui.Brush("#C04B5B70"), BorderBrush = Brushes.White, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(badgeDiameter / 2), IsHitTestVisible = false,
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(badgeDiameter / 2), IsHitTestVisible = false,
             Child = new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Margin = new Thickness(8, 4, 8, 4), Child = numberText }, Visibility = Visibility.Collapsed };
+        Ui.BindBrush(draftNumber, Border.BackgroundProperty, "CloseButtonBrush", Ui.CloseButtonSurface);
+        Ui.BindBrush(draftNumber, Border.BorderBrushProperty, "CloseButtonBorderBrush", Ui.CloseButtonBorder);
         closeButton = Ui.Button(session.TaskId is null ? "×" : "取消保存", CloseEditor); closeButton.Tag = "EditorClose"; closeButton.Width = session.TaskId is null ? 48 : 84; closeButton.Height = 40; closeButton.Padding = new Thickness(0);
-        closeButton.Background = Ui.Brush("#C04B5B70"); closeButton.BorderBrush = Brushes.White; closeButton.Foreground = Brushes.White;
-        closeButton.Style = (Style)Application.Current.FindResource("EditorCloseButton");
+        if (Application.Current?.TryFindResource("EditorCloseButton") is Style closeStyle) closeButton.Style = closeStyle;
+        else { closeButton.Background = Ui.CloseButtonSurface; closeButton.BorderBrush = Ui.CloseButtonBorder; closeButton.Foreground = Ui.CloseButtonText; }
         var closeSlot = new Grid { VerticalAlignment = VerticalAlignment.Center }; closeSlot.Children.Add(closeButton); closeSlot.Children.Add(draftNumber);
         Grid.SetColumn(closeSlot, 1); header.Children.Add(closeSlot); Root.Children.Add(header);
         header.MouseLeftButtonDown += (_, e) =>
@@ -92,14 +93,21 @@ internal sealed class EditorSurface : Grid
         lane.SelectionChanged += (_, _) => { if (lane.SelectedItem is BoardColumn definition) { definition.Assign(session.Working); session.StatusSelected = true; Changed(); } };
         statePanel.Children.Add(lane); row.Children.Add(statePanel);
         var aiPanel = new StackPanel(); aiPanel.Children.Add(Ui.Label("平台（多选）", 12, Ui.Muted));
-        aiButton = Ui.Button("选择", () => ShowOptions(true)); aiPanel.Children.Add(aiButton); Grid.SetColumn(aiPanel, 1); row.Children.Add(aiPanel);
+        aiButton = Ui.Button("选择", () => ShowOptions(true)); aiButton.MinHeight = 32; aiButton.Margin = new Thickness(0, 3, 5, 0); aiButton.Padding = new Thickness(10, 6, 10, 6); aiPanel.Children.Add(aiButton); Grid.SetColumn(aiPanel, 1); row.Children.Add(aiPanel);
         var priorityPanel = new StackPanel(); priorityPanel.Children.Add(Ui.Label("优先级", 12, Ui.Muted));
-        priorityButton = Ui.Button("选择", () => ShowOptions(false)); priorityPanel.Children.Add(priorityButton); Grid.SetColumn(priorityPanel, 2); row.Children.Add(priorityPanel);
+        priorityButton = Ui.Button("选择", () => ShowOptions(false)); priorityButton.MinHeight = 32; priorityButton.Margin = new Thickness(0, 3, 0, 0); priorityButton.Padding = new Thickness(10, 6, 10, 6); priorityPanel.Children.Add(priorityButton); Grid.SetColumn(priorityPanel, 2); row.Children.Add(priorityPanel);
         aiMenu = new OptionMenuToggle(aiButton); priorityMenu = new OptionMenuToggle(priorityButton);
         body.Children.Add(row); body.Children.Add(optionManager); RefreshOptionLabels();
         reminderEditor = new ReminderEditor(session.Working.Reminder, Changed);
         body.Children.Add(reminderEditor);
-        var scroll = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false };
+        var expectScroll = session.Working.Stages.Any(s => s.Text.Length > StageDetailsEditor.DeferredHydrationThreshold);
+        var scroll = new ScrollViewer
+        {
+            Content = body,
+            VerticalScrollBarVisibility = expectScroll ? ScrollBarVisibility.Visible : ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        scroll.ScrollChanged += (_, e) => { if (e.VerticalOffset > 0.5) HydrateVisibleLongStages(scroll); };
         Grid.SetRow(scroll, 1); Root.Children.Add(scroll);
         var bottom = new Grid { Margin = new Thickness(12, 6, 12, 12) };
         bottom.ColumnDefinitions.Add(new ColumnDefinition()); bottom.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -114,7 +122,8 @@ internal sealed class EditorSurface : Grid
         }); delete.Tag = session.TaskId is null ? "DeleteDraft" : "ArchiveTask";
         if (session.TaskId is not null) archiveButton = delete;
         RefreshArchiveCaption();
-        delete.Height = closeButton.Height; delete.HorizontalAlignment = HorizontalAlignment.Left; delete.Foreground = Ui.Brush("#F28F98"); Grid.SetRow(delete, 1); bottom.Children.Add(delete);
+        delete.Height = closeButton.Height; delete.HorizontalAlignment = HorizontalAlignment.Left;
+        Ui.BindBrush(delete, Control.ForegroundProperty, "DangerBrush", Ui.Danger); Grid.SetRow(delete, 1); bottom.Children.Add(delete);
         saveAndClose = async () =>
         {
             if (submitting || closing || snapshotMode) return false;
@@ -131,7 +140,7 @@ internal sealed class EditorSurface : Grid
             finally { submitting = false; Root.IsHitTestVisible = true; }
         };
         var save = Ui.Button("保存任务", async () => await SaveAndClose(), true);
-        save.Foreground = Ui.Brush("#102033"); save.Tag = "SaveTask";
+        save.Tag = "SaveTask";
         if (session.TaskId is not null) closeButton.SetBinding(FrameworkElement.WidthProperty,
             new System.Windows.Data.Binding(nameof(ActualWidth)) { Source = save });
         save.Height = closeButton.Height; Grid.SetColumn(save, 1); Grid.SetRow(save, 1); bottom.Children.Add(save); Grid.SetRow(bottom, 2); Root.Children.Add(bottom);
@@ -152,8 +161,16 @@ internal sealed class EditorSurface : Grid
         controller.Engine.StageSession(Session); status.Text = Session.TaskId is null ? Session.Working.HasContent ? "正在暂存…" : "未保存到任务列表" : "修改尚未提交";
         autosave.Stop(); autosave.Start();
     }
-    private double stageBindingWidth;
-    private double StageBindingWidth()
+    private static double cachedBadgeDiameter;
+    private static double DraftBadgeDiameter()
+    {
+        if (cachedBadgeDiameter > 0) return cachedBadgeDiameter;
+        var legacyClose = Ui.Button("×", () => { }); legacyClose.FontFamily = new FontFamily("Microsoft YaHei UI");
+        legacyClose.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return cachedBadgeDiameter = Math.Min(legacyClose.DesiredSize.Width, legacyClose.DesiredSize.Height) - 6;
+    }
+    private static double stageBindingWidth;
+    private static double StageBindingWidth()
     {
         if (stageBindingWidth > 0) return stageBindingWidth;
         var probe = Ui.Button("", () => { });
@@ -163,17 +180,25 @@ internal sealed class EditorSurface : Grid
     }
     private void RenderStages()
     {
+        foreach (var existing in stageDetailsEditors.Values) existing.CancelIdleHydration();
         foreach (var picker in StagePickers.Values) picker.Dispose(); StagePickers.Clear(); stages.Children.Clear(); stageThreads.Clear(); stageDetailsEditors.Clear();
         var bindingWidth = StageBindingWidth();
+        var expandedLongCount = 0;
+        var collapseInactive = controller.Engine.State.Preferences.CollapseInactiveStageDetails;
         foreach (var stage in Session.Working.Stages)
         {
             var panel = new StackPanel();
-            var details = new StageDetailsEditor(stage.Text, stage.IsRunning == true, controller.Engine.State.Preferences.CollapseInactiveStageDetails);
+            var isExpanded = stage.IsRunning == true || !collapseInactive;
+            var sliceLimit = isExpanded && stage.Text.Length > StageDetailsEditor.DeferredHydrationThreshold
+                ? (expandedLongCount++ == 0 ? StageDetailsEditor.PrimaryInitialSliceChars : StageDetailsEditor.SecondaryInitialSliceChars)
+                : StageDetailsEditor.PrimaryInitialSliceChars;
+            var details = new StageDetailsEditor(stage.Text, stage.IsRunning == true, collapseInactive, sliceLimit, snapshotMode);
             stageDetailsEditors[stage.Id] = details;
             var heading = new DockPanel { Margin = new Thickness(7, 5, 7, 0) };
             var current = Ui.Button("", () => { }); current.Tag = "StageRun"; current.DataContext = stage;
             current.Width = current.Height = 24; current.Padding = new Thickness(0);
             current.VerticalAlignment = VerticalAlignment.Center;
+            Ui.ApplyCircularStyle(current);
             void PresentRunState()
             {
                 current.Content = new StageRunIcon(stage.IsRunning == true, !snapshotMode) { Opacity = stage.IsRunning == true ? 1 : .5 };
@@ -190,8 +215,9 @@ internal sealed class EditorSurface : Grid
             bindingButton.Width = bindingWidth;
             DockPanel.SetDock(bindingButton, Dock.Right); heading.Children.Add(bindingButton);
             DockPanel.SetDock(current, Dock.Right); heading.Children.Add(current);
-            var name = Ui.Input(stage.Name); name.Tag = "StageName"; name.MinHeight = 28; name.MaxWidth = 155; name.Padding = new Thickness(9, 0, 9, 0);
-            name.Margin = new Thickness(0, 3, 3, 3); name.HorizontalAlignment = HorizontalAlignment.Left; name.Foreground = Ui.Accent;
+            var name = Ui.Input(stage.Name); name.Tag = "StageName"; name.MinHeight = 28; name.MinWidth = 64; name.MaxWidth = 155; name.Padding = new Thickness(9, 0, 9, 0);
+            name.Margin = new Thickness(0, 3, 3, 3); name.HorizontalAlignment = HorizontalAlignment.Stretch;
+            Ui.BindBrush(name, Control.ForegroundProperty, "AccentBrush", Ui.Accent);
             name.VerticalContentAlignment = VerticalAlignment.Center; name.VerticalAlignment = VerticalAlignment.Center;
             RoundedInput.SetRadius(name, 14);
             name.TextChanged += (_, _) => { stage.Name = name.Text; Changed(); };
@@ -199,6 +225,7 @@ internal sealed class EditorSurface : Grid
             remove.Width = remove.Height = 24; remove.Padding = new Thickness(0); remove.Margin = new Thickness(1, 3, 4, 3);
             remove.VerticalAlignment = VerticalAlignment.Center; remove.ToolTip = "删除此阶段";
             remove.HorizontalContentAlignment = HorizontalAlignment.Center;
+            Ui.ApplyCircularStyle(remove);
             System.Windows.Automation.AutomationProperties.SetName(remove, "删除阶段：" + stage.Name);
             remove.Click += (_, _) =>
             {
@@ -208,22 +235,21 @@ internal sealed class EditorSurface : Grid
                 RenderStages(); Changed();
             };
             var nameRow = new Grid();
-            nameRow.ColumnDefinitions.Add(new ColumnDefinition());
+            nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MaxWidth = 155 });
             nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            name.HorizontalAlignment = HorizontalAlignment.Left;
             Grid.SetColumn(remove, 1);
             nameRow.Children.Add(name); nameRow.Children.Add(remove); heading.Children.Add(nameRow);
             panel.Children.Add(heading); panel.Children.Add(bindingPanel);
-            var text = details.Input;
-            text.TextChanged += (_, _) => { stage.Text = text.Text; Changed(); }; panel.Children.Add(details);
-            var frame = Ui.Panel(panel, Ui.Brush("#A0121D2D"), 0); frame.CornerRadius = new CornerRadius(20); frame.DataContext = stage;
+            details.TextValueChanged += value => { stage.Text = value; Changed(); }; panel.Children.Add(details);
+            var frame = Ui.Panel(panel, Ui.StagePanelSurface, 0); frame.CornerRadius = new CornerRadius(20); frame.DataContext = stage;
             var reorder = StageReorderGesture.Create(stages, frame,
                 () => !snapshotMode && !submitting && !closing,
                 index => { if (controller.Engine.ReorderStage(Session, stage.Id, index)) { RenderStages(); Changed(); } });
             Grid.SetColumn(reorder, 2); nameRow.Children.Add(reorder);
             StagePickers[stage.Id].StageScope = frame;
-            panel.IsKeyboardFocusWithinChanged += (_, _) => frame.BorderBrush = panel.IsKeyboardFocusWithin ? Ui.Accent : Ui.Line;
+            panel.IsKeyboardFocusWithinChanged += (_, _) =>
+                Ui.BindBrush(frame, Border.BorderBrushProperty, panel.IsKeyboardFocusWithin ? "AccentBrush" : "LineBrush", panel.IsKeyboardFocusWithin ? Ui.Accent : Ui.Line);
             stages.Children.Add(frame);
         }
     }
@@ -238,6 +264,7 @@ internal sealed class EditorSurface : Grid
         if (snapshotMode || !stageDetailsEditors.TryGetValue(stageId, out var editor)) return;
         void FocusInput()
         {
+            editor.EnsureHydrated(preserveCaret: false);
             editor.BringIntoView();
             editor.Input.Focus();
             editor.Input.CaretIndex = editor.Input.Text.Length;
@@ -294,9 +321,20 @@ internal sealed class EditorSurface : Grid
         var p = controller.Engine.State.PriorityOptions.FirstOrDefault(x => x.Id == Session.Working.PriorityId);
         priorityButton.Content = new TextBlock { Text = p?.Name ?? "未选择 ▾", TextTrimming = TextTrimming.CharacterEllipsis };
         priorityButton.ToolTip = null;
-        priorityButton.Foreground = p is null ? Ui.Text : Ui.Brush(p.Color);
+        if (p is null) priorityButton.ClearValue(Control.ForegroundProperty);
+        else priorityButton.Foreground = Ui.ReadableTagBrush(p.Color, Ui.ButtonSurface);
         foreach (var colorButton in SnapshotChildren<Button>(optionManager).Where(x => Equals(x.Tag, "OptionColor")))
             if (colorButton.DataContext is FieldOption option) colorButton.Foreground = Ui.Brush(option.Color);
+    }
+    internal void ApplyTheme()
+    {
+        RefreshOptionLabels();
+        foreach (var picker in StagePickers.Values) picker.ApplyTheme();
+        foreach (var frame in stages.Children.OfType<Border>())
+        {
+            var focused = frame.IsKeyboardFocusWithin;
+            Ui.BindBrush(frame, Border.BorderBrushProperty, focused ? "AccentBrush" : "LineBrush", focused ? Ui.Accent : Ui.Line);
+        }
     }
     private void ShowOptions(bool ai)
     {
@@ -309,7 +347,7 @@ internal sealed class EditorSurface : Grid
         foreach (var option in ai ? controller.Engine.State.AiOptions : controller.Engine.State.PriorityOptions)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal };
-            var select = new CheckBox { Content = option.Name, Foreground = Ui.Brush(option.Color), VerticalAlignment = VerticalAlignment.Center,
+            var select = new CheckBox { Content = option.Name, Foreground = Ui.ReadableTagBrush(option.Color, Ui.MenuSurface), VerticalAlignment = VerticalAlignment.Center,
                 IsChecked = ai ? Session.Working.AiIds.Contains(option.Id) : Session.Working.PriorityId == option.Id, MinWidth = 140 };
             select.Click += (_, _) =>
             {
@@ -318,7 +356,7 @@ internal sealed class EditorSurface : Grid
                 Changed(); RefreshOptionLabels();
             };
             row.Children.Add(select);
-            var color = Ui.Button("●", () => controller.ColorMenu(option, button)); color.Tag = "OptionColor"; color.DataContext = option; color.ToolTip = "更改“" + option.Name + "”的颜色"; color.Foreground = Ui.Brush(option.Color); row.Children.Add(color);
+            var color = Ui.Button("●", () => controller.ColorMenu(option, button)); color.Tag = "OptionColor"; color.DataContext = option; color.ToolTip = "更改“" + option.Name + "”的颜色"; color.Foreground = Ui.Brush(option.Color); color.Width = color.Height = 28; color.Padding = new Thickness(0); Ui.ApplyCircularStyle(color); row.Children.Add(color);
             menu.Items.Add(new MenuItem { Header = row, StaysOpenOnClick = true });
         }
         menu.Items.Add(UiMenu("＋ 管理选项", () => ShowOptionManager(ai)));
@@ -349,16 +387,34 @@ internal sealed class EditorSurface : Grid
     }
     public void Show() => controller.ShowEditor(this, false);
     public void Activate() => controller.ShowEditor(this, true);
-    public void Destroy() { reminderEditor.ClosePopups(); foreach (var picker in StagePickers.Values) picker.Dispose(); aiMenu.Dispose(); priorityMenu.Dispose(); autosave.Stop(); Host = null; }
+    internal void EnsureAllStagesHydrated()
+    {
+        foreach (var details in stageDetailsEditors.Values) details.EnsureHydrated(preserveCaret: details.Input.IsKeyboardFocusWithin);
+    }
+    private void HydrateVisibleLongStages(ScrollViewer scroll)
+    {
+        if (snapshotMode) return;
+        foreach (var details in stageDetailsEditors.Values)
+        {
+            if (details.IsHydrated) continue;
+            try
+            {
+                var top = details.TranslatePoint(new Point(0, 0), scroll).Y;
+                if (top <= scroll.ViewportHeight + 400) details.EnsurePreviewExpanded();
+            }
+            catch (InvalidOperationException) { }
+        }
+    }
+    public void Destroy() { foreach (var details in stageDetailsEditors.Values) details.CancelIdleHydration(); reminderEditor.ClosePopups(); foreach (var picker in StagePickers.Values) picker.Dispose(); aiMenu.Dispose(); priorityMenu.Dispose(); autosave.Stop(); Host = null; }
     private void ShowOptionManager(bool ai)
     {
         optionManager.Children.Clear(); optionManager.Visibility = Visibility.Visible;
-        var heading = new DockPanel(); var close = Ui.Button("×", () => optionManager.Visibility = Visibility.Collapsed); DockPanel.SetDock(close, Dock.Right); heading.Children.Add(close);
+        var heading = new DockPanel(); var close = Ui.Button("×", () => optionManager.Visibility = Visibility.Collapsed); close.Width = close.Height = 28; close.Padding = new Thickness(0); Ui.ApplyCircularStyle(close); DockPanel.SetDock(close, Dock.Right); heading.Children.Add(close);
         heading.Children.Add(Ui.Label(ai ? "平台选项" : "优先级选项", 14)); optionManager.Children.Add(heading);
         foreach (var option in ai ? controller.Engine.State.AiOptions : controller.Engine.State.PriorityOptions)
         {
-            var row = new DockPanel(); var remove = Ui.Button("删除", () => { controller.DeleteOption(option.Id, ai); ShowOptionManager(ai); }); DockPanel.SetDock(remove, Dock.Right); row.Children.Add(remove);
-            var color = Ui.Button("●", () => controller.ColorMenu(option, optionManager)); color.Tag = "OptionColor"; color.DataContext = option; color.ToolTip = "更改“" + option.Name + "”的颜色"; color.Foreground = Ui.Brush(option.Color); DockPanel.SetDock(color, Dock.Right); row.Children.Add(color);
+            var row = new DockPanel(); var remove = Ui.Button("删除", () => { controller.DeleteOption(option.Id, ai); ShowOptionManager(ai); }); remove.MinHeight = 32; DockPanel.SetDock(remove, Dock.Right); row.Children.Add(remove);
+            var color = Ui.Button("●", () => controller.ColorMenu(option, optionManager)); color.Tag = "OptionColor"; color.DataContext = option; color.ToolTip = "更改“" + option.Name + "”的颜色"; color.Foreground = Ui.Brush(option.Color); color.Width = color.Height = 28; color.Padding = new Thickness(0); Ui.ApplyCircularStyle(color); DockPanel.SetDock(color, Dock.Right); row.Children.Add(color);
             var name = Ui.Input(option.Name); name.LostKeyboardFocus += (_, _) => { if (string.IsNullOrWhiteSpace(name.Text)) { name.Text = option.Name; return; } option.Name = name.Text.Trim(); controller.OptionsChanged(); }; row.Children.Add(name); optionManager.Children.Add(row);
         }
         optionManager.Children.Add(Ui.Button("＋ 新增选项", () => { var values = ai ? controller.Engine.State.AiOptions : controller.Engine.State.PriorityOptions; values.Add(new FieldOption { Name = "新选项" }); controller.OptionsChanged(); ShowOptionManager(ai); }));
@@ -411,4 +467,5 @@ internal sealed class TaskEditorWindow : SurfaceWindow
     public EditorSurface View { get; }
     public TaskEditorWindow(EditorSurface view) : base(430, EditorSurface.DefaultHeight)
     { View = view; WindowLayer = 1; Title = "编辑任务"; Root.Children.Add(view); view.Host = this; view.RefreshArchiveCaption(); Closed += (_, _) => view.Destroy(); }
+    public override void ApplyTheme() { base.ApplyTheme(); View.ApplyTheme(); }
 }

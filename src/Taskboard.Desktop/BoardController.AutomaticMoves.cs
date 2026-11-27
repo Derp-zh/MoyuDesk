@@ -69,14 +69,9 @@ internal sealed partial class BoardController
     }
     internal IReadOnlyList<Guid> TickReminders(DateTime now)
     {
-        var previous = Engine.State.Tasks.ToDictionary(x => x.Id, x => x.Lane);
         var due = ReminderClock.Tick(Engine.State, now);
         if (due.Count == 0) return due;
-        var moves = due.Select(id => Engine.State.Tasks.First(x => x.Id == id))
-            .Select(task => PrepareAutomaticMove(task, previous[task.Id])).OfType<AutomaticMove>().ToArray();
-        // Preserve the reminder's original ordering and single save notification.
         Engine.Notify(due);
-        foreach (var move in moves) move.Completion = Animate(move);
         return due;
     }
     private async Task Animate(AutomaticMove move)

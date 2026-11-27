@@ -13,6 +13,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)../BoardController.GameInput.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../BoardController.Hotkey.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../BoardController.OutsideClicks.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../BoardController.PinnedAction.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../BoardController.TaskSwitcher.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../ImeWindowFilter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)../CardDragSession.cs" />

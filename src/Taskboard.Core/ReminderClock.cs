@@ -24,8 +24,7 @@ public static class ReminderClock
             {
                 r.LastOccurrence = occurrence;
                 if (!task.PendingReasons.Contains("定时提醒到期")) task.PendingReasons.Add("定时提醒到期");
-                task.Lane = Lane.Action;
-                task.ColumnId = null; task.TimerUnread = true;
+                task.TimerUnread = true;
                 task.UpdatedUtc = DateTime.UtcNow;
                 due.Add(task.Id);
             }

@@ -13,10 +13,31 @@ if (-not (Test-Path -LiteralPath $defaultSound)) {
     Copy-Item -LiteralPath $systemSound -Destination $defaultSound
 }
 $packageCache = Join-Path $repository 'test-output/nuget-packages'
-dotnet publish (Join-Path $repository 'src/Taskboard.Desktop/Taskboard.Desktop.csproj') -c Release -r win-x64 --self-contained true -p:NuGetAudit=false -p:UseSharedCompilation=false -p:MSBuildEnableWorkloadResolver=false -m:1 -nr:false -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false "-p:RestorePackagesPath=$packageCache" -o $destination --nologo
+$csprojPath = Join-Path $repository 'src/Taskboard.Desktop/Taskboard.Desktop.csproj'
+dotnet publish $csprojPath -c Release -r win-x64 --self-contained true -p:NuGetAudit=false -p:UseSharedCompilation=false -p:MSBuildEnableWorkloadResolver=false -m:1 -nr:false -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false "-p:RestorePackagesPath=$packageCache" -o $destination --nologo
 if ($LASTEXITCODE -ne 0) { throw '发布失败。' }
 Copy-Item -LiteralPath (Join-Path $repository 'README.md') -Destination (Join-Path $destination '使用说明.md')
 Copy-Item -LiteralPath (Join-Path $repository 'CHANGELOG.md') -Destination (Join-Path $destination '版本说明.md')
 Copy-Item -LiteralPath (Join-Path $repository 'docs/THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $destination 'THIRD-PARTY-NOTICES.txt')
 Move-Item -LiteralPath (Join-Path $destination 'Taskboard.exe') -Destination (Join-Path $destination 'MoyuDesk.exe')
+
+# Bundle fixed-directory install / upgrade / rollback / uninstall scripts + version.json
+$csprojXml = [xml](Get-Content -Raw -Encoding UTF8 -LiteralPath $csprojPath)
+$appVersion = [string]$csprojXml.Project.PropertyGroup.Version
+if ([string]::IsNullOrWhiteSpace($appVersion)) { $appVersion = '0.0.0' }
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+$versionManifest = [ordered]@{
+    version = $appVersion.Trim()
+    builtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    executable = 'MoyuDesk.exe'
+} | ConvertTo-Json -Depth 4
+[System.IO.File]::WriteAllText((Join-Path $destination 'version.json'), $versionManifest, $utf8NoBom)
+
+$scriptsTarget = Join-Path $destination 'scripts'
+New-Item -ItemType Directory -Force -Path $scriptsTarget | Out-Null
+foreach ($scriptName in 'install.ps1', 'rollback.ps1', 'uninstall.ps1') {
+    Copy-Item -LiteralPath (Join-Path $repository "tools/scripts/$scriptName") -Destination (Join-Path $scriptsTarget $scriptName)
+}
+Copy-Item -LiteralPath (Join-Path $repository 'tools/scripts/安装或升级摸鱼台.cmd') -Destination (Join-Path $destination '安装或升级摸鱼台.cmd')
+
 Get-FileHash -LiteralPath (Join-Path $destination 'MoyuDesk.exe') -Algorithm SHA256 | Format-List

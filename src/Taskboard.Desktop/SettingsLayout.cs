@@ -17,6 +17,7 @@ internal sealed partial class SettingsSurface
         var descriptions = new Dictionary<string, string>
         {
             ["主设置"] = "日常操作、快捷键和启动方式。",
+            ["外观"] = "切换深夜、白天或跟随系统模式，选择深浅配色方案，即时预览并自动保存。",
             ["窗口"] = "调整列表显示、透明度和窗口位置。",
             ["监听"] = "为指定应用设置统一的通知提示音。",
             ["归档"] = "管理自动归档规则，找回已归档的任务。",
@@ -40,18 +41,23 @@ internal sealed partial class SettingsSurface
         if (name == "主设置")
         {
             var startup = Array.FindIndex(items, x => x is CheckBox { Tag: "SettingsAutoStart" });
+            var updateIdx = Array.FindIndex(items, x => x is FrameworkElement { Tag: "AppUpdateSection" });
             var hotkey = startup - 1;
             if (startup < 2) return;
             panel.Children.Clear(); Header();
             Group("日常使用", items.Skip(1).Take(hotkey - 1));
             Group("", items.Skip(hotkey).Take(1));
-            var startupItems = items.Skip(startup).Take(items.Length - startup - 1).ToArray();
-            Group("启动与快捷方式", startupItems.Take(2));
-            if (startupItems.Length > 2)
+            var startupEnd = updateIdx > startup ? updateIdx : items.Length - 1;
+            var startupItems = items.Skip(startup).Take(startupEnd - startup).ToArray();
+            // Keep checkbox, shortcut button, live auto-start status/warning & direct Windows settings button visible!
+            var visibleStartupCount = Math.Min(5, startupItems.Length);
+            Group("启动与快捷方式", startupItems.Take(visibleStartupCount));
+            if (startupItems.Length > visibleStartupCount)
             {
-                var repair = new StackPanel(); foreach (var child in startupItems.Skip(2)) repair.Children.Add(child);
+                var repair = new StackPanel(); foreach (var child in startupItems.Skip(visibleStartupCount)) repair.Children.Add(child);
                 CompactActions(repair); panel.Children.Add(SettingsDisclosure("启动诊断与修复", repair));
             }
+            if (updateIdx > startup) Group("", items.Skip(updateIdx).Take(1));
             panel.Children.Add(items[^1]);
         }
         else if (name == "窗口")
@@ -91,17 +97,28 @@ internal sealed partial class SettingsSurface
         }
     }
 
-    private static Border SettingsCard(UIElement child) => new()
+    private static Border SettingsCard(UIElement child)
     {
-        Child = child, Background = Ui.Card, BorderBrush = Ui.Line, BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(12), Padding = new Thickness(16), Margin = new Thickness(0, 0, 0, 14)
-    };
+        var border = new Border
+        {
+            Child = child, BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12), Padding = new Thickness(16), Margin = new Thickness(0, 0, 0, 14)
+        };
+        Ui.BindBrush(border, Border.BackgroundProperty, "CardPanelBrush", Ui.Card);
+        Ui.BindBrush(border, Border.BorderBrushProperty, "LineBrush", Ui.Line);
+        return border;
+    }
 
-    private static Expander SettingsDisclosure(string caption, UIElement child) => new()
+    private static Expander SettingsDisclosure(string caption, UIElement child)
     {
-        Header = caption, Content = child, Foreground = Ui.Muted, FontSize = 12,
-        Margin = new Thickness(0, 10, 0, 12), Padding = new Thickness(0, 8, 0, 0), IsExpanded = false
-    };
+        var expander = new Expander
+        {
+            Header = caption, Content = child, FontSize = 12,
+            Margin = new Thickness(0, 10, 0, 12), Padding = new Thickness(0, 8, 0, 0), IsExpanded = false
+        };
+        Ui.BindBrush(expander, Control.ForegroundProperty, "MutedBrush", Ui.Muted);
+        return expander;
+    }
 
     private static void CompactActions(Panel panel)
     {

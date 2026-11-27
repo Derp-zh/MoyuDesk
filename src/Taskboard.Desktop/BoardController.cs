@@ -147,6 +147,7 @@ internal sealed partial class BoardController : IDisposable
         Isolated = isolated; Smoke = smoke; Store = new AtomicStore(dataDirectory, isolated ? Path.Combine(dataDirectory, "configuration") : DataPaths.ConfigurationDirectory());
         pathSelectionFile = isolated ? Path.Combine(Path.GetFullPath(dataDirectory), "launch-settings.json") : DataPaths.SelectionFile;
         Engine = new BoardEngine(Store.Load()); AttachEngine();
+        ThemePalette.Apply(ThemePalette.Resolve(Engine.State.Preferences));
         this.onboardingDevice = onboardingDevice;
         onboardingLegacy = onboardingDevice is not null && Engine.State.Preferences.MachineMarkers.Keys.Any(key => key == "shortcut:" + onboardingDevice.MachineId || key == "startup:" + onboardingDevice.MachineId);
         if (Engine.State.Preferences.ConnectionConfigs.ContainsKey(CodexInitialization.InspectorKey))
@@ -177,8 +178,56 @@ internal sealed partial class BoardController : IDisposable
         foregroundHook = SetWinEventHook(3, 3, IntPtr.Zero, foregroundCallback, 0, 0, 0);
         SurfaceWindow.AnyWindowActivated += OnSurfaceActivated;
         SurfaceWindow.AnyActiveWindowHiding += NotifyActiveWindowHiding;
-        InitializeTaskSwitcher();
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnSystemUserPreferenceChanged;
         if (!Smoke) outsideClicks = new OutsideClickObserver(this);
+    }
+    private void OnSystemUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (exiting || Engine.State.Preferences.ThemeMode != ThemeMode.System) return;
+        Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!exiting && Engine.State.Preferences.ThemeMode == ThemeMode.System)
+                ApplyAppearance(onlyIfChanged: true);
+        }));
+    }
+    internal bool IsOwnedSettings(SettingsSurface surface) => ReferenceEquals(settings, surface);
+    internal void SetThemeMode(ThemeMode mode)
+    {
+        Engine.State.Preferences.ThemeMode = ThemePresets.NormalizeMode(mode);
+        ApplyAppearance();
+        Engine.Touch();
+    }
+    internal void SetDarkThemePreset(string presetId, bool switchToDark = true)
+    {
+        Engine.State.Preferences.DarkThemePreset = ThemePresets.NormalizeDark(presetId);
+        if (switchToDark) Engine.State.Preferences.ThemeMode = ThemeMode.Dark;
+        ApplyAppearance();
+        Engine.Touch();
+    }
+    internal void SetLightThemePreset(string presetId, bool switchToLight = true)
+    {
+        Engine.State.Preferences.LightThemePreset = ThemePresets.NormalizeLight(presetId);
+        if (switchToLight) Engine.State.Preferences.ThemeMode = ThemeMode.Light;
+        ApplyAppearance();
+        Engine.Touch();
+    }
+    internal void ApplyAppearance(bool onlyIfChanged = false, Func<bool>? systemIsLight = null)
+    {
+        var palette = ThemePalette.Resolve(Engine.State.Preferences, systemIsLight);
+        if (onlyIfChanged && ReferenceEquals(ThemePalette.Current, palette)) return;
+        ThemePalette.Apply(palette);
+        foreach (var column in Columns) column.ApplyTheme();
+        Ball?.ApplyTheme();
+        draftStack?.ApplyTheme();
+        foreach (var window in taskWindows.Values.ToArray()) window.ApplyTheme();
+        foreach (var editor in Editors.ToArray()) editor.ApplyTheme();
+        foreach (var window in auxiliary.ToArray())
+        {
+            if (!ReferenceEquals(window, settings)) window.ApplyTheme();
+        }
+        ActionPinOverlay?.ApplyTheme();
+        if (tray?.ContextMenuStrip is { } menu) OrbMenuRenderer.ApplyTheme(menu);
+        settings?.ApplyTheme();
     }
     private void OnSurfaceActivated(SurfaceWindow window) { if (!exiting) MarkAppForeground(); }
     public async Task Start()
@@ -306,10 +355,19 @@ internal sealed partial class BoardController : IDisposable
         if (expanded) EnsureCodexConnection();
         if (exiting || Expanded == expanded) return;
         Expanded = expanded;
-        if (expanded) SuppressForegroundCollapse(400);
+        if (expanded)
+        {
+            ActionPinnedHiddenByHotkey = false;
+            MarkAppForeground(); SuppressForegroundCollapse(400);
+        }
         else appWasForeground = false;
         if (!expanded) CancelTemporaryCompleted();
-        if (OffscreenNoShow) return;
+        if (OffscreenNoShow)
+        {
+            if (ActionColumn is { } offscreenAction && ActionPinned) offscreenAction.SetPinnedOverlay(true);
+            SyncActionPinOverlay();
+            return;
+        }
         Native.BeginWorkspaceChange();
         try
         {
@@ -324,14 +382,37 @@ internal sealed partial class BoardController : IDisposable
                 hiddenDialogs.Clear(); hiddenDialogs.AddRange(Native.Dialogs()); foreach (var dialog in hiddenDialogs) Native.ShowWindow(dialog, 0);
                 hiddenGroup.Clear(); hiddenGroup.AddRange(taskWindows.Values.Cast<SurfaceWindow>().Append(draftStack).Concat(auxiliary).Where(x => x.ShouldRestore && !ReferenceEquals(x, settings)).OrderBy(x => x.ActivationOrder));
                 previouslyActive = hiddenGroup.LastOrDefault(x => x.IsActive);
-                foreach (var column in Columns) column.PrepareHide();
+                foreach (var column in Columns)
+                    if (!(column.Definition.BuiltinLane == Lane.Action && ShouldKeepActionPinnedVisible))
+                        column.PrepareHide();
                 foreach (var editor in Editors) editor.PrepareHide();
                 foreach (var window in auxiliary.ToArray()) window.Hide(); draftStack.Hide(); Ball.HidePopups();
             }
             var feedbackClock=Stopwatch.StartNew();
-            foreach (var column in Columns) { if (ColumnIsVisible(column)) column.Reveal(expanded, true); else column.Hide(); }
+            foreach (var column in Columns)
+            {
+                if (column.Definition.BuiltinLane == Lane.Action && ActionPinned && ColumnIsVisible(column))
+                {
+                    column.SetPinnedOverlay(true);
+                    if (!expanded && !ActionPinnedHiddenByHotkey)
+                    {
+                        if (!column.IsVisible) column.Reveal(true, false);
+                        continue;
+                    }
+                    if (!expanded && ActionPinnedHiddenByHotkey)
+                    {
+                        column.Hide();
+                        continue;
+                    }
+                    column.Reveal(true, true);
+                    continue;
+                }
+                if (ColumnIsVisible(column)) column.Reveal(expanded, true); else column.Hide();
+            }
+            SyncActionPinOverlay();
             LastWorkspaceRevealMs=feedbackClock.Elapsed.TotalMilliseconds; feedbackClock.Restart();
-            Ball.SetExpanded(expanded);
+            if (Engine.State.Preferences.BallVisible) Ball.SetExpanded(expanded);
+            else Ball.HideCompletely();
             LastBallRevealMs=feedbackClock.Elapsed.TotalMilliseconds; feedbackClock.Restart();
             if (expanded)
             {
@@ -501,7 +582,6 @@ internal sealed partial class BoardController : IDisposable
     public void Locate(Guid id)
     {
         var item = Engine.State.Tasks.FirstOrDefault(x => x.Id == id); if (item is null) return;
-        if (item.TimerUnread) { item.TimerUnread = false; Engine.Notify([id]); }
         var definition = BoardColumns.For(Engine.State.Preferences,item);
         if (FocusMode)
         {
@@ -601,12 +681,25 @@ internal sealed partial class BoardController : IDisposable
     public void ColumnsChanged(bool layout = true)
     {
         SynchronizeColumns(); if (layout) { foreach (var column in Columns) { Engine.State.Preferences.Positions.Remove(column.Definition.PositionKey); Engine.State.Preferences.Positions.Remove(ColumnDefaultPrefix + column.Definition.PositionKey); } RestorePositions(); }
-        foreach (var column in Columns) { column.ApplySettings(); if (Expanded && ColumnIsVisible(column)) column.Show(); else column.Hide(); }
+        if (ActionPinned && ActionColumn is { } pinnedAction && !ColumnIsVisible(pinnedAction)) SetActionPinned(false);
+        foreach (var column in Columns)
+        {
+            column.ApplySettings();
+            if (column.Definition.BuiltinLane == Lane.Action && ShouldKeepActionPinnedVisible)
+            {
+                column.SetPinnedOverlay(true);
+                if (!OffscreenNoShow && !column.IsVisible) column.Reveal(true, false);
+            }
+            else if (Expanded && ColumnIsVisible(column)) column.Show();
+            else column.Hide();
+        }
+        SyncActionPinOverlay();
         foreach (var editor in Editors) editor.RefreshColumns(); Engine.Touch(); Ball.RefreshData();
     }
     private void RestorePositions()
     {
-        Ball.RestoreFromEdge();
+        if (Engine.State.Preferences.BallVisible) Ball.RestoreFromEdge();
+        else Ball.HideCompletely();
         var area = WorkArea(Ball);
         var defaults = DefaultColumnPositions(); EnsureColumnDefaults(defaults);
         var visible = ConfiguredColumns;
@@ -619,9 +712,10 @@ internal sealed partial class BoardController : IDisposable
         if (Engine.State.Preferences.Positions.TryGetValue("ball", out var ball)) Ball.Place(ball);
         else Ball.Place(new WindowPosition { X = area.Right - 78, Y = area.Bottom - 76, Width = 58, Height = 58 });
         Clamp(Ball);
-        Ball.RefreshEdgeAutoHide();
+        if (Engine.State.Preferences.BallVisible) Ball.RefreshEdgeAutoHide();
+        else Ball.HideCompletely();
         ApplyFocusPositions();
-        if (Expanded) Ball.SetExpanded(true);
+        if (Expanded && Engine.State.Preferences.BallVisible) Ball.SetExpanded(true);
     }
     internal Rect MaximumRange { get { var columns = VisibleColumns; var bounds = columns.Length == 0 ? Rect.Empty : new Rect(columns.Min(x => x.Left),columns.Min(x => x.Top),columns.Max(x => x.Left+x.Width)-columns.Min(x => x.Left),columns.Max(x => x.Top+x.Height)-columns.Min(x => x.Top)); if (FocusMode && !focusCompletedSlot.IsEmpty) bounds.Union(focusCompletedSlot); return bounds; } }
     private ColumnSurface[] scaleWindows = [];
@@ -717,7 +811,7 @@ internal sealed partial class BoardController : IDisposable
     {
         foreach (var key in Engine.State.Preferences.Positions.Keys.Where(x => x == "ball" || x.StartsWith("focus:", StringComparison.Ordinal) || x.StartsWith(ColumnDefaultPrefix, StringComparison.Ordinal) || x.StartsWith("lane-", StringComparison.Ordinal) || x.StartsWith("column-",StringComparison.Ordinal)).ToArray()) Engine.State.Preferences.Positions.Remove(key);
         focusRange = Rect.Empty;
-        RestorePositions(); if (Expanded) { Ball.SetExpanded(false); Ball.SetExpanded(true); LayoutDrafts(); } Engine.Touch();
+        RestorePositions(); if (Expanded) { if (Engine.State.Preferences.BallVisible) { Ball.SetExpanded(false); Ball.SetExpanded(true); } LayoutDrafts(); } Engine.Touch();
     }
     public void OrbMenu(FrameworkElement target)
     {
@@ -801,9 +895,22 @@ internal sealed partial class BoardController : IDisposable
         Engine.State.Preferences.BallEdgeAutoHide = enabled;
         Ball.RefreshEdgeAutoHide(); settings?.RefreshBallEdgeAutoHide(); Engine.Touch();
     }
-    private void HideBall() { Ball.HidePopups(); Ball.Hide(); Engine.State.Preferences.BallVisible = false; Engine.Touch(); }
+    internal void HideBall()
+    {
+        Engine.State.Preferences.BallVisible = false;
+        Ball.HideCompletely();
+        Engine.Touch();
+    }
     private void ToggleBallVisibility() { if (Engine.State.Preferences.BallVisible) HideBall(); else ShowBall(); }
-    private void ShowBall() { Ball.Show(); Engine.State.Preferences.BallVisible = true; Engine.Touch(); }
+    internal void ShowBall()
+    {
+        Engine.State.Preferences.BallVisible = true;
+        Ball.PreparePlacement();
+        if (!OffscreenNoShow) Ball.Show();
+        Ball.RefreshEdgeAutoHide();
+        if (Expanded) Ball.SetExpanded(true);
+        Engine.Touch();
+    }
     private async Task CheckReminders()
     {
         if (explicitSave > 0 || exiting || dataTransition) return;
@@ -811,7 +918,7 @@ internal sealed partial class BoardController : IDisposable
         if (await Flush())
         {
             notified = due.ToArray();
-            tray.ShowBalloonTip(4000, "任务提醒", $"{due.Count}项任务已进入待操作。点击查看。", Forms.ToolTipIcon.Info);
+            tray.ShowBalloonTip(4000, "任务提醒", $"{due.Count}项任务定时提醒已到期。点击查看。", Forms.ToolTipIcon.Info);
         }
     }
     private void ShowNotificationTasks()
@@ -836,9 +943,9 @@ internal sealed partial class BoardController : IDisposable
             await Store.SaveAsync(candidate);
             ResetEditors();
             DetachEngine(); Engine = new BoardEngine(candidate); AttachEngine(); dirtyVersion++; savedVersion = dirtyVersion;
-            SynchronizeColumns(); settings?.Destroy(); settings = null; OnChanged(candidate.Tasks.Select(x => x.Id).ToArray()); ApplySettings(); RestorePositions();
+            SynchronizeColumns(); settings?.Destroy(); settings = null; OnChanged(candidate.Tasks.Select(x => x.Id).ToArray()); ApplySettings(); ApplyAppearance(); RestorePositions();
             await Listening.Apply();
-            if (Expanded) { foreach (var session in Engine.State.Sessions.Where(x => x.Visible && !x.Inline)) EnsureEditor(session).Show(); LayoutDrafts(); Ball.SetExpanded(false); Ball.SetExpanded(true); }
+            if (Expanded) { foreach (var session in Engine.State.Sessions.Where(x => x.Visible && !x.Inline)) EnsureEditor(session).Show(); LayoutDrafts(); if (Engine.State.Preferences.BallVisible) { Ball.SetExpanded(false); Ball.SetExpanded(true); } }
         }
         finally { saveGate.Release(); }
     }
@@ -861,7 +968,7 @@ internal sealed partial class BoardController : IDisposable
         {
             await Store.SaveAsync(candidate);
             Engine.State.Preferences = candidate.Preferences; Engine.State.AiOptions = candidate.AiOptions; Engine.State.PriorityOptions = candidate.PriorityOptions;
-            SynchronizeColumns(); ColumnsChanged(false); SurfaceWindow.SetTransparency(candidate.Preferences.GlassTransparency, candidate.Preferences.FloatingTransparency); OptionsChanged(); ApplySettings(); RestorePositions();
+            SynchronizeColumns(); ColumnsChanged(false); SurfaceWindow.SetTransparency(candidate.Preferences.GlassTransparency, candidate.Preferences.FloatingTransparency); ActionColumn?.RefreshGlass(); OptionsChanged(); ApplySettings(); ApplyAppearance(); RestorePositions(); SyncActionPinOverlay();
             foreach (var editor in Editors) editor.RefreshOptionLabels();
             if (!Isolated) StartupLinks.SetAutoStart(candidate.Preferences.AutoStart);
         }
@@ -894,7 +1001,7 @@ internal sealed partial class BoardController : IDisposable
             {
                 await next.SaveAsync(candidate); DataPaths.Save(pathSelectionFile, target, Store.ConfigurationDirectory);
                 ResetEditors(); DetachEngine(); Engine = new BoardEngine(candidate); AttachEngine(); Store = next; dirtyVersion++; savedVersion = dirtyVersion;
-                SynchronizeColumns(); ColumnsChanged(false); OnChanged(candidate.Tasks.Select(x => x.Id).ToArray()); ApplySettings(); SurfaceWindow.SetTransparency(candidate.Preferences.GlassTransparency, candidate.Preferences.FloatingTransparency); RestorePositions();
+                SynchronizeColumns(); ColumnsChanged(false); OnChanged(candidate.Tasks.Select(x => x.Id).ToArray()); ApplySettings(); ApplyAppearance(); SurfaceWindow.SetTransparency(candidate.Preferences.GlassTransparency, candidate.Preferences.FloatingTransparency); ActionColumn?.RefreshGlass(); RestorePositions(); SyncActionPinOverlay();
                 if (Expanded) { foreach (var session in Engine.State.Sessions.Where(x => x.Visible && !x.Inline).ToArray()) EnsureEditor(session).Show(); LayoutDrafts(); }
                 directoryLocks.Add(lease); retained = true;
             }
@@ -942,7 +1049,8 @@ internal sealed partial class BoardController : IDisposable
         saveTimer.Stop(); reminderTimer.Stop(); DetachEngine();
         SurfaceWindow.AnyWindowActivated -= OnSurfaceActivated;
         SurfaceWindow.AnyActiveWindowHiding -= NotifyActiveWindowHiding;
-        taskSwitcher?.DestroySwitcher(); taskSwitcher = null;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemUserPreferenceChanged;
+        DisposeActionPinOverlay();
         if (foregroundHook != IntPtr.Zero) UnhookWinEvent(foregroundHook);
         outsideClicks?.Dispose(); outsideClicks = null;
         _ = Codex.DisposeAsync(); tray.Visible = false; tray.Dispose(); trayIcon.Dispose();
